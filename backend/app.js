@@ -3,6 +3,7 @@ import morgan from 'morgan';
 import connect from './db/db.js'; // Import the connect function from db.js
 import userRoutes from './routes/user.routes.js'; // Import user routes
 import projectRoutes from './routes/project.routes.js'; // Import project routes
+import aiRoutes from './routes/ai.routes.js'; // Import AI routes
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 connect(); // Call the connect function to establish a database connection
@@ -17,6 +18,7 @@ app.use(cookieParser()); // Middleware to parse cookies
 
 app.use('/users', userRoutes); // Use user routes
 app.use('/projects', projectRoutes); // Use project routes
+app.use('/ai',aiRoutes )// Use AI routes
 
 
 

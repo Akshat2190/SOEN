@@ -6,6 +6,7 @@ import jwt from "jsonwebtoken";
 import cors from "cors";
 import mongoose from "mongoose";
 import projectModel from "./models/project.model.js";
+import { generateResult } from "./services/ai.service.js";
 
 app.use(cors());
 
@@ -18,11 +19,11 @@ const io = new Server(server, {
   },
 });
 
-io.use(async(socket, next) => {
-
+io.use(async (socket, next) => {
   try {
-
-    const token = socket.handshake.auth?.token || socket.handshake.headers.authorization?.split(" ")[1];
+    const token =
+      socket.handshake.auth?.token ||
+      socket.handshake.headers.authorization?.split(" ")[1];
     const projectId = socket.handshake.query?.projectId;
 
     if (!projectId || !mongoose.Types.ObjectId.isValid(projectId)) {
@@ -50,16 +51,48 @@ io.use(async(socket, next) => {
 });
 
 io.on("connection", (socket) => {
-  socket.roomId = socket.project._id.toString()
+  socket.roomId = socket.project._id.toString();
 
   console.log("✓ User connected:", socket.id);
 
   socket.join(socket.roomId);
 
-  socket.on("project-message", data => {
-    console.log(data)
+  socket.on("project-message", async (data) => {
+    const message = data.message;
+
+    const aiIsPresentInMessage = message.includes("@ai");
     socket.broadcast.to(socket.roomId).emit("project-message", data);
-  })
+
+    if (aiIsPresentInMessage) {
+      try {
+        const prompt = message.replace("@ai", "");
+
+        const result = await generateResult(prompt);
+
+        io.to(socket.roomId).emit("project-message", {
+          message: result,
+          sender: {
+            _id: "ai",
+            email: "AI",
+          },
+        });
+      } catch (error) {
+        console.error("AI Error:", error.message);
+
+        // Send error message to client
+        io.to(socket.roomId).emit("project-message", {
+          message:
+            "Sorry, the AI service is currently unavailable. Please try again later.",
+          sender: {
+            _id: "ai",
+            email: "AI",
+          },
+        });
+      }
+
+      return;
+    }
+  });
 
   socket.on("disconnect", () => {
     console.log("✗ User disconnected");

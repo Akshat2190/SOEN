@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect, useContext, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import axios from "../config/axios";
 import {
@@ -7,6 +7,19 @@ import {
   sendMessage,
 } from "../config/socket";
 import { UserContext } from "../context/user.context.jsx";
+import Markdown from "markdown-to-jsx";
+
+function SyntaxHighlightedCode(props) {
+  const ref = useRef(null);
+
+  React.useEffect(() => {
+    if (ref.current && window.hljs) {
+      window.hljs.highlightElement(ref.current);
+    }
+  }, [props.children]);
+
+  return <code {...props} ref={ref} />;
+}
 
 const Project = () => {
   const location = useLocation();
@@ -14,9 +27,10 @@ const Project = () => {
 
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState(new Set()); // Initialized as Set
+  const [selectedUserId, setSelectedUserId] = useState(new Set());
   const [project, setProject] = useState(location.state.project);
   const [message, setMessage] = useState("");
+  const [messages, setMessages] = useState([]); // Add this line
   const messageBox = React.createRef();
 
   const [users, setUsers] = useState([]);
@@ -40,8 +54,18 @@ const Project = () => {
       .get("/users/all")
       .then((res) => setUsers(res.data.users || []))
       .catch(console.error);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    // Initialize highlight.js
+    if (window.hljs) {
+      window.hljs.configure({ ignoreUnescapedHTML: true });
+    }
   }, [location.state.project._id, project._id]);
+
+  // Add auto-scroll effect
+  useEffect(() => {
+    scrollToBottom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
 
   const handleUserClick = (id) => {
     setSelectedUserId((prevSelectedUserId) => {
@@ -80,59 +104,22 @@ const Project = () => {
     };
 
     sendMessage("project-message", messageData);
-    appendOutGoingMessage(messageData); // Pass the object, not just the string
+    appendOutGoingMessage(messageData);
     setMessage("");
   };
 
   function scrollToBottom() {
-    messageBox.current.scrollTop = messageBox.current.scrollHeight;
+    if (messageBox.current) {
+      messageBox.current.scrollTop = messageBox.current.scrollHeight;
+    }
   }
 
   function appendIncomingMessage(messageObject) {
-    const messageBox = document.querySelector(".message-box");
-
-    const message = document.createElement("div");
-    message.classList.add(
-      "message",
-      "max-w-60",
-      "break-words", // Add this
-      "flex",
-      "flex-col",
-      "p-2",
-      "bg-slate-50",
-      "w-fit",
-      "rounded-md"
-    );
-    message.innerHTML = `
-      <small class="opacity-65 text-xs">${messageObject.sender.email}</small>
-      <p class="text-sm break-words">${messageObject.message}</p>`;
-
-    messageBox.appendChild(message);
-    scrollToBottom();
+    setMessages((prev) => [...prev, { ...messageObject, isOutgoing: false }]);
   }
 
   function appendOutGoingMessage(messageObject) {
-    const messageBox = document.querySelector(".message-box");
-
-    const message = document.createElement("div");
-    message.classList.add(
-      "ml-auto",
-      "message",
-      "max-w-60",
-      "break-words", // Add this
-      "flex",
-      "flex-col",
-      "p-2",
-      "bg-slate-50",
-      "w-fit",
-      "rounded-md"
-    );
-    message.innerHTML = `
-      <small class="opacity-65 text-xs">${messageObject.sender.email}</small>
-      <p class="text-sm break-words">${messageObject.message}</p>`;
-
-    messageBox.appendChild(message);
-    scrollToBottom();
+    setMessages((prev) => [...prev, { ...messageObject, isOutgoing: true }]);
   }
 
   return (
@@ -159,7 +146,33 @@ const Project = () => {
           <div
             ref={messageBox}
             className="message-box p-1 flex-grow flex flex-col gap-1 overflow-y-auto scrollbar-hide"
-          ></div>
+          >
+            {messages.map((msg, index) => (
+              <div
+                key={index}
+                className={`message max-w-60 break-words flex flex-col p-2 bg-slate-50 w-fit rounded-md ${
+                  msg.isOutgoing ? "ml-auto" : ""
+                }`}
+              >
+                <small className="opacity-65 text-xs">{msg.sender.email}</small>
+                {msg.sender._id === "ai" ? (
+                  <div className="text-sm overflow-auto bg-slate-950 text-white rounded-sm break-words p-2">
+                    <Markdown
+                      options={{
+                        overrides: {
+                          code: SyntaxHighlightedCode,
+                        },
+                      }}
+                    >
+                      {msg.message}
+                    </Markdown>
+                  </div>
+                ) : (
+                  <p className="text-sm break-words">{msg.message}</p>
+                )}
+              </div>
+            ))}
+          </div>
           <div className="inputField w-full flex bg-amber-50">
             <input
               value={message}
