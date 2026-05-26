@@ -45,6 +45,7 @@ const Project = () => {
 
   const [webContainer, setWebContainer] = useState(null);
   const [iframeUrl, setIframeUrl] = useState(null)
+  const didLoadProjectRef = useRef(false);
 
   useEffect(() => {
     initializeSocket(project._id);
@@ -81,7 +82,23 @@ const Project = () => {
       setMessages((prevMessages) => [...prevMessages, data]);
     });
 
-    axios.get(`/projects/get-project/${location.state.project._id}`)
+    axios
+      .get(`/projects/get-project/${location.state.project._id}`)
+      .then((res) => {
+        const fetchedProject = res.data.project;
+        setProject(fetchedProject);
+        setFileTree(fetchedProject?.fileTree || {});
+        didLoadProjectRef.current = true;
+
+        const fileNames = Object.keys(fetchedProject?.fileTree || {});
+        setOpenFiles(fileNames);
+        if (!currentFile && fileNames.length) {
+          setCurrentFile(fileNames[0]);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load project:", error);
+      });
     if (window.hljs) {
       window.hljs.configure({ ignoreUnescapedHTML: true });
     }
@@ -93,7 +110,20 @@ const Project = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
+  useEffect(() => {
+    if (!didLoadProjectRef.current) return;
+    if (!currentFile || !fileTree[currentFile]) return;
+
+    const timeoutId = setTimeout(() => {
+      saveFileTree(fileTree);
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [fileTree, currentFile]);
+
   function saveFileTree(ft) {
+    if (!didLoadProjectRef.current) return;
+
     axios.put("/projects/update-file-tree", {
       projectId: project._id,
       fileTree: ft
@@ -423,6 +453,21 @@ const Project = () => {
                       className="hljs h-full outline-none"
                       contentEditable
                       suppressContentEditableWarning
+                      onInput={(e) => {
+                        const updatedContent = e.target.innerText;
+                        const ft = {
+                          ...fileTree,
+                          [currentFile]: {
+                            ...fileTree[currentFile],
+                            file: {
+                              ...fileTree[currentFile].file,
+                              contents: updatedContent,
+                            },
+                          },
+                        };
+
+                        setFileTree(ft);
+                      }}
                       onBlur={(e) => {
                         const updatedContent = e.target.innerText;
                         const ft = {
@@ -437,7 +482,6 @@ const Project = () => {
                         };
 
                         setFileTree(ft);
-                        saveFileTree(ft);
 
                         try {
                           if (window && window.hljs) {
