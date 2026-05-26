@@ -1,264 +1,402 @@
 import React, { useState, useContext } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import axios from "../config/axios";
 import { UserContext } from "../context/user.context";
 
+/* ─── constants ────────────────────────────────────────────────── */
+const PAINTING_SRC = "/painting.png";
+
+/* ─── tiny style objects ────────────────────────────────────────── */
+const dmSans = { fontFamily: "'DM Sans', sans-serif" };
+const playfair = { fontFamily: "'Playfair Display', serif" };
+
+const inputStyle = {
+  background: "#f0eeeb",
+  border: "none",
+  borderRadius: "8px",
+  padding: "12px 16px",
+  fontSize: "14px",
+  color: "#333",
+  width: "100%",
+  outline: "none",
+  boxSizing: "border-box",
+  ...dmSans,
+};
+
+/* ─── component ─────────────────────────────────────────────────── */
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const { setUser } = useContext(UserContext);
-
   const navigate = useNavigate();
 
-  function submitHandler(e) {
-    e.preventDefault();
-
+  /* keep the real login logic intact */
+  function submitHandler() {
+    setLoading(true);
     axios
       .post("/users/login", { email, password })
       .then((res) => {
         console.log(res.data);
-
         localStorage.setItem("token", res.data.token);
         setUser(res.data.user);
-
         navigate("/");
       })
       .catch((err) => {
-        console.log(err.response.data);
+        console.log(err?.response?.data);
+        setLoading(false);
       });
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
-      {/* Decorative background */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute -top-24 -left-24 h-96 w-96 rounded-full bg-indigo-600/25 blur-3xl" />
-        <div className="absolute bottom-[-6rem] right-[-4rem] h-[28rem] w-[28rem] rounded-full bg-fuchsia-600/20 blur-3xl" />
-        <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.07)_1px,transparent_1px)] [background-size:20px_20px] opacity-40" />
-      </div>
+    <>
+      {/* ── Global page: painting fills the full viewport ── */}
+      <div
+        style={{
+          position: "relative",
+          minHeight: "100vh",
+          width: "100%",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {/* Background painting — no overlay */}
+        <img
+          src={PAINTING_SRC}
+          alt="Impressionist background"
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: "center",
+            zIndex: 0,
+          }}
+        />
 
-      <div className="mx-auto flex min-h-screen max-w-7xl items-center justify-center p-4 sm:p-6">
-        <div className="w-full max-w-sm sm:max-w-md">
-          {/* Badge/Logo */}
-          <div className="mb-6 sm:mb-8 flex items-center justify-center">
-            <div className="relative">
-              <span className="absolute inset-0 rounded-full bg-gradient-to-tr from-indigo-500/40 via-purple-400/30 to-cyan-400/30 blur-xl" />
-              <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-slate-900/70 shadow-xl backdrop-blur">
-                <svg
-                  width="22"
-                  height="22"
-                  viewBox="0 0 24 24"
-                  className="text-indigo-400"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    d="M12 3l2.6 5.27L20.5 9l-4.25 4.14L17.2 19 12 15.9 6.8 19l.95-5.86L3.5 9l5.9-.73L12 3z"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                  />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          {/* Card with gradient border glow */}
-          <div className="relative">
-            <div
-              aria-hidden
-              className="absolute -inset-[1px] rounded-3xl bg-gradient-to-br from-indigo-500/40 via-purple-500/25 to-cyan-500/25 blur-xl"
+        {/* ── Floating card ── */}
+        <div
+          style={{
+            position: "relative",
+            zIndex: 1,
+            background: "#ffffff",
+            borderRadius: "20px",
+            width: "min(680px, 95vw)",
+            minHeight: "420px",
+            display: "flex",
+            overflow: "hidden",
+            /* no shadow, just white + clean */
+          }}
+        >
+          {/* ── LEFT COLUMN: cropped painting ── */}
+          <div
+            className="login-left-col"
+            style={{
+              width: "42%",
+              flexShrink: 0,
+              overflow: "hidden",
+              borderRadius: "20px 0 0 20px",
+            }}
+          >
+            <img
+              src={PAINTING_SRC}
+              alt="Painting detail"
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                objectPosition: "center",
+                display: "block",
+              }}
             />
-            <div className="relative rounded-3xl border border-white/10 bg-slate-900/60 p-5 sm:p-7 shadow-2xl backdrop-blur-xl">
-              <div className="mb-5 text-center">
-                <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-                  Welcome back
-                </h1>
-                <p className="mt-2 text-sm sm:text-base text-slate-400">
-                  Sign in to continue
-                </p>
+          </div>
+
+          {/* ── RIGHT COLUMN: form ── */}
+          <div
+            style={{
+              width: "58%",
+              background: "#ffffff",
+              padding: "40px 36px",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              boxSizing: "border-box",
+              ...dmSans,
+            }}
+          >
+            {/* TOP — back link */}
+            <div>
+              <button
+                id="login-back-btn"
+                onClick={() => console.log("back")}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  color: "#666",
+                  padding: 0,
+                  marginBottom: "24px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  ...dmSans,
+                }}
+              >
+                ← Back
+              </button>
+
+              {/* MIDDLE — heading + inputs */}
+              <p
+                style={{
+                  fontSize: "14px",
+                  color: "#888",
+                  fontWeight: 400,
+                  marginBottom: "4px",
+                  marginTop: 0,
+                }}
+              >
+                Login to
+              </p>
+
+              <h1
+                style={{
+                  fontSize: "30px",
+                  fontWeight: 700,
+                  color: "#1a1a1a",
+                  lineHeight: 1.2,
+                  marginTop: 0,
+                  marginBottom: "28px",
+                  ...playfair,
+                }}
+              >
+                Where Knowledge
+                <br />
+                Comes Alive
+              </h1>
+
+              {/* Email input */}
+              <input
+                id="login-email"
+                type="email"
+                placeholder="Enter email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  console.log("email:", e.target.value);
+                }}
+                style={{ ...inputStyle, marginBottom: "10px" }}
+              />
+
+              {/* Password input */}
+              <input
+                id="login-password"
+                type="password"
+                placeholder="Enter password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  console.log("password changed");
+                }}
+                style={{ ...inputStyle, marginBottom: "16px" }}
+              />
+
+              {/* Login button */}
+              <button
+                id="login-submit-btn"
+                onClick={submitHandler}
+                disabled={loading}
+                className="login-btn"
+                style={{
+                  width: "100%",
+                  padding: "12px 16px",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  color: "#fff",
+                  background: loading
+                    ? "#a0896a"
+                    : "linear-gradient(135deg, #8b6914 0%, #6b7c3a 100%)",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  marginBottom: "14px",
+                  letterSpacing: "0.3px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
+                  boxShadow: "0 2px 8px rgba(107, 124, 58, 0.30)",
+                  opacity: loading ? 0.75 : 1,
+                  ...dmSans,
+                }}
+              >
+                {loading ? (
+                  <>
+                    <svg
+                      width="15" height="15" viewBox="0 0 24 24"
+                      fill="none" className="login-spinner"
+                      style={{ animation: "loginSpin 0.75s linear infinite" }}
+                    >
+                      <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.35)" strokeWidth="3" />
+                      <path d="M12 2a10 10 0 0 1 10 10" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+                    </svg>
+                    Signing in…
+                  </>
+                ) : (
+                  <>Sign in →</>
+                )}
+              </button>
+
+              {/* Sign-up prompt */}
+              <p style={{ fontSize: "13px", color: "#999", margin: 0 }}>
+                Don&apos;t have an account?{" "}
+                <button
+                  id="login-signup-link"
+                  onClick={() => navigate("/register")}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    color: "#3b6ea5",
+                    padding: 0,
+                    textDecoration: "none",
+                    ...dmSans,
+                  }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.textDecoration = "underline")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.textDecoration = "none")
+                  }
+                >
+                  Sign up
+                </button>
+              </p>
+            </div>
+
+            {/* BOTTOM — logo row */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginTop: "32px",
+              }}
+            >
+              {/* Logo mark + wordmark */}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                {/* Geometric logo mark: black circle with white arc */}
+                <div
+                  aria-hidden="true"
+                  style={{
+                    width: "28px",
+                    height: "28px",
+                    borderRadius: "50%",
+                    background: "#111",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M3 13 L13 3"
+                      stroke="white"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </div>
+
+                {/* Wordmark */}
+                <span
+                  style={{
+                    fontFamily: "sans-serif",
+                    fontWeight: 700,
+                    fontSize: "16px",
+                    color: "#111",
+                    letterSpacing: "-0.5px",
+                  }}
+                >
+                  SOEN
+                </span>
               </div>
 
-              <form onSubmit={submitHandler} className="space-y-5">
-                {/* Email */}
-                <div>
-                  <label
-                    htmlFor="email"
-                    className="mb-1 block text-sm text-slate-300"
-                  >
-                    Email
-                  </label>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-500">
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                      >
-                        <path
-                          d="M3 7l9 6 9-6"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                        <rect
-                          x="3"
-                          y="5"
-                          width="18"
-                          height="14"
-                          rx="2"
-                          ry="2"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                        />
-                      </svg>
-                    </span>
-                    <input
-                      id="email"
-                      name="email"
-                      type="email"
-                      inputMode="email"
-                      autoComplete="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@example.com"
-                      className="mt-0 w-full rounded-xl bg-slate-950/70 border border-slate-800 text-slate-100 placeholder-slate-500 pl-10 pr-3 py-3 sm:py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    />
-                  </div>
-                </div>
-
-                {/* Password */}
-                <div>
-                  <label
-                    htmlFor="password"
-                    className="mb-1 block text-sm text-slate-300"
-                  >
-                    Password
-                  </label>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-500">
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                      >
-                        <rect
-                          x="5"
-                          y="11"
-                          width="14"
-                          height="9"
-                          rx="2"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                        />
-                        <path
-                          d="M8 11V8a4 4 0 0 1 8 0v3"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                        />
-                      </svg>
-                    </span>
-                    <input
-                      id="password"
-                      name="password"
-                      type={showPassword ? "text" : "password"}
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="mt-0 w-full rounded-xl bg-slate-950/70 border border-slate-800 text-slate-100 placeholder-slate-500 pl-10 pr-10 py-3 sm:py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((v) => !v)}
-                      className="absolute inset-y-0 right-2 inline-flex items-center rounded-md p-2 text-slate-400 hover:text-slate-200"
-                      aria-label={
-                        showPassword ? "Hide password" : "Show password"
-                      }
-                    >
-                      {showPassword ? (
-                        <svg
-                          width="18"
-                          height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                        >
-                          <path
-                            d="M3 3l18 18"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                          />
-                          <path
-                            d="M10.58 10.58A3 3 0 0 0 12 15a3 3 0 0 0 2.42-4.42M9.88 5.09A10.92 10.92 0 0 1 12 5c7 0 10 7 10 7a13.2 13.2 0 0 1-3.17 4.5M6.18 6.18A13.2 13.2 0 0 0 2 12s3 7 10 7c1.33 0 2.58-.24 3.73-.68"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                      ) : (
-                        <svg
-                          width="18"
-                          height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                        >
-                          <path
-                            d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                          />
-                          <circle
-                            cx="12"
-                            cy="12"
-                            r="3"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                          />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 hover:from-indigo-500 hover:via-violet-500 hover:to-fuchsia-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all px-4 py-3 sm:py-2.5 text-base sm:text-sm font-medium shadow-[0_0_0_0_rgba(0,0,0,0)] hover:shadow-[0_0_30px_0_rgba(99,102,241,0.35)] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+              {/* Right tagline */}
+              <div style={{ textAlign: "right" }}>
+                <p
+                  style={{
+                    fontSize: "10px",
+                    color: "#999",
+                    margin: 0,
+                    lineHeight: 1.4,
+                  }}
                 >
-                  Sign in
-                </button>
-              </form>
-
-              <div className="mt-6 flex flex-col items-center gap-3 text-sm sm:text-base">
-                <Link
-                  to="/forgot-password"
-                  className="text-slate-400 hover:text-slate-200 transition-colors"
+                  Real-time Collaboration for
+                </p>
+                <p
+                  style={{
+                    fontSize: "10px",
+                    color: "#999",
+                    margin: 0,
+                    lineHeight: 1.4,
+                  }}
                 >
-                  Forgot password?
-                </Link>
-                <p className="text-slate-400">
-                  Don&apos;t have an account?{" "}
-                  <Link
-                    to="/register"
-                    className="text-indigo-400 hover:text-indigo-300 underline underline-offset-4"
-                  >
-                    Create one
-                  </Link>
+                  Developers.
                 </p>
               </div>
             </div>
           </div>
-
-          {/* Footer hint */}
-          <p className="mt-6 text-center text-xs text-slate-500">
-            Protected by modern security best practices.
-          </p>
         </div>
       </div>
-    </div>
+
+      {/* ── Responsive + button animations ── */}
+      <style>{`
+        @media (max-width: 640px) {
+          .login-left-col {
+            display: none !important;
+          }
+          .login-left-col ~ div {
+            width: 100% !important;
+          }
+        }
+        #login-email::placeholder,
+        #login-password::placeholder {
+          color: #aaa;
+        }
+        #login-email:-webkit-autofill,
+        #login-password:-webkit-autofill {
+          -webkit-box-shadow: 0 0 0 40px #f0eeeb inset !important;
+          -webkit-text-fill-color: #333 !important;
+        }
+        .login-btn:not(:disabled):hover {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 18px rgba(107, 124, 58, 0.40) !important;
+        }
+        .login-btn:not(:disabled):active {
+          transform: translateY(0px);
+          box-shadow: 0 2px 6px rgba(107, 124, 58, 0.25) !important;
+        }
+        @keyframes loginSpin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </>
   );
 };
 

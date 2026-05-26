@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useContext, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import axios from "../config/axios";
@@ -8,6 +9,7 @@ import {
 } from "../config/socket";
 import { UserContext } from "../context/user.context.jsx";
 import Markdown from "markdown-to-jsx";
+import { getWebContainer } from "../config/webContainer.js";
 
 function SyntaxHighlightedCode(props) {
   const ref = useRef(null);
@@ -32,30 +34,54 @@ const Project = () => {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]); // Add this line
   const messageBox = React.createRef();
+  const codeRef = useRef(null);
+  const runProcessRef = useRef(null);
 
   const [users, setUsers] = useState([]);
+  const [fileTree, setFileTree] = useState({});
+  const [currentFile, setCurrentFile] = useState(null);
+  const [openFiles, setOpenFiles] = useState([]);
+  const [aiError, setAiError] = useState(null);
+
+  const [webContainer, setWebContainer] = useState(null);
+  const [iframeUrl, setIframeUrl] = useState(null)
 
   useEffect(() => {
     initializeSocket(project._id);
 
+    if (!webContainer) {
+      getWebContainer().then(container => {
+        setWebContainer(container);
+        console.log("container started")
+      }).catch(error => {
+        console.error("Failed to initialize WebContainer:", error);
+      })
+    }
+
     receiveMessage("project-message", (data) => {
-      console.log(data);
-      appendIncomingMessage(data);
+      try {
+        const message = JSON.parse(data.message);
+
+        webContainer?.mount(message.fileTree); 
+
+        if (message.fileTree) {
+          // Transform the AI fileTree structure
+          const transformedFileTree = {};
+          Object.keys(message.fileTree).forEach((filename) => {
+            transformedFileTree[filename] = message.fileTree[filename];
+          });
+          setFileTree(transformedFileTree);
+          setAiError(null); // Clear any previous errors
+        }
+      } catch (error) {
+        console.error("Error parsing message:", error);
+        setAiError("Failed to process AI response");
+      }
+
+      setMessages((prevMessages) => [...prevMessages, data]);
     });
 
-    axios
-      .get(`/projects/get-project/${location.state.project._id}`)
-      .then((res) => {
-        setProject(res.data.project);
-      });
-
-    // fetch users (adjust endpoint)
-    axios
-      .get("/users/all")
-      .then((res) => setUsers(res.data.users || []))
-      .catch(console.error);
-
-    // Initialize highlight.js
+    axios.get(`/projects/get-project/${location.state.project._id}`)
     if (window.hljs) {
       window.hljs.configure({ ignoreUnescapedHTML: true });
     }
@@ -66,6 +92,17 @@ const Project = () => {
     scrollToBottom();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
+
+  function saveFileTree(ft) {
+    axios.put("/projects/update-file-tree", {
+      projectId: project._id,
+      fileTree: ft
+    }).then(res => {
+      console.log("File tree updated successfully", res.data);
+    }).catch(err => {
+      console.error("Failed to update file tree:", err);
+    })
+  }
 
   const handleUserClick = (id) => {
     setSelectedUserId((prevSelectedUserId) => {
@@ -122,6 +159,25 @@ const Project = () => {
     setMessages((prev) => [...prev, { ...messageObject, isOutgoing: true }]);
   }
 
+  function writeAiMessage(message) {
+    const messageObject = JSON.parse(message);
+    console.log(message)
+
+    return (
+      <div className="text-sm overflow-auto bg-slate-950 text-white rounded-sm break-words p-2">
+        <Markdown
+          options={{
+            overrides: {
+              code: SyntaxHighlightedCode,
+            },
+          }}
+        >
+          {messageObject.text}
+        </Markdown>
+      </div>
+    );
+  }
+
   return (
     <main className="h-screen w-screen flex">
       <section className="left relative flex flex-col h-screen min-w-80 bg-slate-300">
@@ -151,22 +207,12 @@ const Project = () => {
               <div
                 key={index}
                 className={`message max-w-60 break-words flex flex-col p-2 bg-slate-50 w-fit rounded-md ${
-                  msg.isOutgoing ? "ml-auto" : ""
+                  msg.sender._id === user._id ? "ml-auto" : ""
                 }`}
               >
                 <small className="opacity-65 text-xs">{msg.sender.email}</small>
                 {msg.sender._id === "ai" ? (
-                  <div className="text-sm overflow-auto bg-slate-950 text-white rounded-sm break-words p-2">
-                    <Markdown
-                      options={{
-                        overrides: {
-                          code: SyntaxHighlightedCode,
-                        },
-                      }}
-                    >
-                      {msg.message}
-                    </Markdown>
-                  </div>
+                  writeAiMessage(msg.message)
                 ) : (
                   <p className="text-sm break-words">{msg.message}</p>
                 )}
@@ -220,6 +266,244 @@ const Project = () => {
               })}
           </div>
         </div>
+      </section>
+
+      <section className="right bg-red-50 flex-grow h-full flex">
+
+        <div className="explorer h-full min-w-52 max-w-64 bg-slate-400">
+          <div className="file-tree w-full">
+            {
+              Object.keys(fileTree).map((file) => (
+                <button 
+                 key={file}
+                 onClick={() => {
+                  setCurrentFile(file)
+                  setOpenFiles([ ...new Set([ ...openFiles, file ])]) 
+                 }} 
+                 className="tree-element cursor-pointer w-full p-2 px-4 flex items-center gap-2 bg-slate-200 ">
+                  <p className="font-semibold text-lg">{file}</p>
+                </button>
+              ))
+            }
+          </div>
+        </div>
+        
+          <div className="code-editor flex flex-col flex-grow h-full">
+
+              <div className="top flex justify-between w-full">
+
+                <div className="files flex">
+                  {
+                    openFiles.map((file) => (
+                      <button 
+                        key={file}
+                        onClick={() => setCurrentFile(file)} 
+                        className={`tab-element cursor-pointer p-2 px-4 border-b-2 ${currentFile === file ? 'border-blue-600 bg-slate-300' : 'border-transparent hover:bg-slate-200' }`}
+                      >
+                        <p className="font-semibold text-lg">{file}</p>
+                      </button>
+                    ))
+                  }
+                </div>
+
+                <div className="actions flex gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!webContainer) {
+                        console.error("WebContainer is not ready yet");
+                        return;
+                      }
+
+                      const filePaths = Object.keys(fileTree || {});
+                      if (!filePaths.length) {
+                        console.error("No files available to run");
+                        return;
+                      }
+
+                      if (runProcessRef.current) {
+                        try {
+                          runProcessRef.current.kill();
+                        } catch (e) {
+                          console.warn("Failed to stop previous run process", e);
+                        }
+                        runProcessRef.current = null;
+                      }
+
+                      await webContainer.mount(fileTree);
+
+                      const packageJsonPath = filePaths.find((path) => path.endsWith("package.json"));
+                      if (!packageJsonPath) {
+                        console.error("No package.json found in generated files");
+                        return;
+                      }
+
+                      const workingDirectory =
+                        packageJsonPath.includes("/")
+                          ? packageJsonPath.split("/").slice(0, -1).join("/")
+                          : ".";
+
+                      let runArgs = ["start"];
+                      try {
+                        const packageJson = JSON.parse(fileTree[packageJsonPath]?.file?.contents || "{}");
+                        if (!packageJson?.scripts?.start && packageJson?.scripts?.dev) {
+                          runArgs = ["run", "dev"];
+                        }
+                      } catch (error) {
+                        console.error("Failed to parse package.json:", error);
+                      }
+
+                      const installProcess = await webContainer.spawn("npm", ["install"], {
+                        cwd: workingDirectory,
+                      });
+
+                      installProcess.output.pipeTo(new WritableStream({
+                        write(chunk) {
+                          console.log(chunk);
+                        }
+                      }));
+
+                      const installExitCode = await installProcess.exit;
+                      if (installExitCode !== 0) {
+                        console.error("npm install failed", installExitCode);
+                        return;
+                      }
+
+                      // Attempt to kill any previous server running on common dev port before starting
+                      try {
+                        // Use --yes to auto-accept installing kill-port if npx prompts
+                        const killProcess = await webContainer.spawn("npx", ["--yes", "kill-port", "3000"], {
+                          cwd: workingDirectory,
+                        });
+
+                        killProcess.output.pipeTo(new WritableStream({
+                          write(chunk) {
+                            console.log(chunk);
+                          }
+                        }));
+
+                        // wait for kill to finish but ignore non-zero exit
+                        try { await killProcess.exit; } catch (e) { console.warn('kill-port failed', e); }
+                      } catch (e) {
+                        console.warn('Failed to spawn kill command', e);
+                      }
+
+                      const runProcess = await webContainer.spawn("npm", runArgs, {
+                        cwd: workingDirectory,
+                      });
+
+                      runProcessRef.current = runProcess;
+
+                      runProcess.output.pipeTo(new WritableStream({
+                        write(chunk) {
+                          console.log(chunk);
+                        }
+                      }));
+
+                      runProcess.exit.finally(() => {
+                        if (runProcessRef.current === runProcess) {
+                          runProcessRef.current = null;
+                        }
+                      });
+
+                      webContainer.on("server-ready", (port, url)=>{
+                        console.log(port, url);
+                        setIframeUrl(url);
+                      })
+                    }}
+                    className="px-5 bg-slate-300 text-white"
+                    >run</button>
+
+                </div>
+              </div>
+              <div className="bottom h-full">
+                {fileTree[currentFile] && (
+                  <pre className="h-full w-full overflow-auto bg-slate-100 p-4">
+                    <code
+                      ref={codeRef}
+                      className="hljs h-full outline-none"
+                      contentEditable
+                      suppressContentEditableWarning
+                      onBlur={(e) => {
+                        const updatedContent = e.target.innerText;
+                        const ft = {
+                          ...fileTree,
+                          [currentFile]: {
+                            ...fileTree[currentFile],
+                            file: {
+                              ...fileTree[currentFile].file,
+                              contents: updatedContent,
+                            },
+                          },
+                        };
+
+                        setFileTree(ft);
+                        saveFileTree(ft);
+
+                        try {
+                          if (window && window.hljs) {
+                            const language = currentFile?.endsWith(".js")
+                              ? "javascript"
+                              : currentFile?.endsWith(".jsx")
+                                ? "javascript"
+                                : currentFile?.endsWith(".css")
+                                  ? "css"
+                                  : currentFile?.endsWith(".html")
+                                    ? "html"
+                                    : "plaintext";
+
+                            e.target.innerHTML = window.hljs.highlight(updatedContent, { language }).value;
+                          }
+                        } catch (err) {
+                          console.error("hljs highlight failed", err);
+                        }
+                      }}
+                      dangerouslySetInnerHTML={{
+                        __html: (() => {
+                          const contents = fileTree[currentFile].file.contents || "";
+
+                          try {
+                            if (window && window.hljs) {
+                              const language = currentFile?.endsWith(".js")
+                                ? "javascript"
+                                : currentFile?.endsWith(".jsx")
+                                  ? "javascript"
+                                  : currentFile?.endsWith(".css")
+                                    ? "css"
+                                    : currentFile?.endsWith(".html")
+                                      ? "html"
+                                      : "plaintext";
+
+                              return window.hljs.highlight(contents, { language }).value;
+                            }
+                          } catch (err) {
+                            console.error("hljs highlight failed", err);
+                          }
+
+                          return contents;
+                        })(),
+                      }}
+                      style={{
+                        whiteSpace: "pre-wrap",
+                        paddingBottom: "25rem",
+                        counterSet: "line-number",
+                      }}
+                    />
+                  </pre>
+                )}
+              </div>
+          </div>
+
+          {iframeUrl && webContainer && 
+            (<div className="flex flex-col min-w-96 h-full">
+              <div className="address-bar">
+                <input type="text"
+                  onChange={(e) => setIframeUrl(e.target.value)}
+                  value={iframeUrl} className="w-full p-2 px-4 bg-slate-200" />
+              </div>
+              <iframe src={iframeUrl} className="w-full h-full"></iframe>
+            </div>)
+          }
+        
       </section>
 
       {isModalOpen && (
