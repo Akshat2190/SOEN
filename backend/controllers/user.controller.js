@@ -2,6 +2,7 @@ import userModel from "../models/user.model.js";
 import * as userService from "../services/user.service.js";
 import { validationResult } from "express-validator";
 import redisClient from "../services/redis.service.js";
+import { getAuthToken } from "../middleware/auth.middleware.js";
 
 export const createUserController = async (req, res) => {
   const errors = validationResult(req);
@@ -57,18 +58,32 @@ export const loginController = async (req, res) => {
 };
 
 export const profileController = async (req, res) => {
-  console.log(req.user);
+  try {
+    const user = await userModel.findOne({ email: req.user.email });
 
-  res.status(200).json({ user: req.user });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.status(200).json({ user });
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
 
 }
 
 export const logoutController = async (req, res) => {
   try {
     
-    const token = req.cookies.token || req.headers.authorization.split(' ')[1];
+    const token = getAuthToken(req);
 
-    redisClient.set(token, 'logout', 'EX', 60 * 60 * 24); // 24 hours
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized User' });
+    }
+
+    await redisClient.set(token, 'logout', 'EX', 60 * 60 * 24); // 24 hours
+
+    res.clearCookie('token');
 
     res.status(200).json({ message: 'Logged out successfully' });
 

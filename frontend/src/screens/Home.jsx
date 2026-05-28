@@ -22,6 +22,8 @@ const Home = () => {
         })
             .then((res) => {
                 console.log(res)
+                setProject((prev) => [...prev, res.data])
+                setProjectName('')
                 setIsModalOpen(false)
             })
             .catch((error) => {

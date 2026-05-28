@@ -85,8 +85,12 @@ export const getProjectById = async (req, res) => {
     const {projectId} = req.params;
 
     try {
+        const loggedInUser = await userModel.findOne({email: req.user.email});
 
-        const project = await projectService.getProjectById({projectId});
+        const project = await projectService.getProjectById({
+            projectId,
+            userId: loggedInUser._id
+        });
 
         return res.status(200).json({project});
     }catch (err) {
@@ -105,10 +109,12 @@ export const updateFileTree = async (req, res) => {
 
     try {
         const {projectId, fileTree} = req.body;
+        const loggedInUser = await userModel.findOne({email: req.user.email});
 
         const project = await projectService.updateFileTree({
             projectId,
-            fileTree
+            fileTree,
+            userId: loggedInUser._id
         })
 
         return res.status(200).json({project});

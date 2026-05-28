@@ -6,12 +6,26 @@ import projectRoutes from './routes/project.routes.js'; // Import project routes
 import aiRoutes from './routes/ai.routes.js'; // Import AI routes
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
+
 connect(); // Call the connect function to establish a database connection
 
 const app = express();
+const allowedOrigins = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(',').map((origin) => origin.trim())
+  : [];
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-app.use(cors())
-app.use(morgan('dev')); // Logging middleware
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions))
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev')); // Logging middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser()); // Middleware to parse cookies
@@ -23,7 +37,7 @@ app.use('/ai',aiRoutes )// Use AI routes
 
 
 app.get('/', (req, res) => {
-  res.send('Hello World!');
+  res.json({ status: 'ok' });
 });
 
 app.use((err, req, res, next) => {

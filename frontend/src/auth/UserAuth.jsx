@@ -1,21 +1,37 @@
 import React, { useContext, useEffect, useState } from 'react'
 import UserContext from '../context/user.context.jsx'
 import { useNavigate } from 'react-router-dom'
+import axios from '../config/axios'
 
 const UserAuth = ({children}) => {
 
-    const { user } = useContext(UserContext);
+    const { user, setUser } = useContext(UserContext);
     const [loading, setLoading] = useState(true);
-    const token = localStorage.getItem('token');
     const navigate = useNavigate();
 
     useEffect(() => {
-        if(!token || !user){
-            navigate('/login')
-        } else {
-            setLoading(false);
+        const token = localStorage.getItem('token');
+
+        if (!token) {
+            navigate('/login', { replace: true });
+            return;
         }
-    }, [token, user, navigate])
+
+        if (user) {
+            setLoading(false);
+            return;
+        }
+
+        axios.get('/users/profile')
+            .then((res) => {
+                setUser(res.data.user);
+                setLoading(false);
+            })
+            .catch(() => {
+                localStorage.removeItem('token');
+                navigate('/login', { replace: true });
+            });
+    }, [user, setUser, navigate])
 
     if (loading) {
         return <div>Loading...</div>;

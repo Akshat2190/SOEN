@@ -3,19 +3,21 @@ import http from "http";
 import app from "./app.js";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
-import cors from "cors";
 import mongoose from "mongoose";
 import projectModel from "./models/project.model.js";
+import userModel from "./models/user.model.js";
 import { generateResult } from "./services/ai.service.js";
 
-app.use(cors());
-
 const port = process.env.PORT || 3000;
+const allowedOrigins = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(",").map((origin) => origin.trim())
+  : ["*"];
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: allowedOrigins,
+    credentials: true,
   },
 });
 
@@ -30,8 +32,6 @@ io.use(async (socket, next) => {
       return next(new Error("Authentication error: Invalid project ID"));
     }
 
-    socket.project = await projectModel.findById(projectId);
-
     if (!token) {
       return next(new Error("Authentication error: No token provided"));
     }
@@ -42,7 +42,23 @@ io.use(async (socket, next) => {
       return next(new Error("Authentication error: Invalid token"));
     }
 
+    const loggedInUser = await userModel.findOne({ email: decoded.email });
+
+    if (!loggedInUser) {
+      return next(new Error("Authentication error: User not found"));
+    }
+
+    const project = await projectModel.findOne({
+      _id: projectId,
+      users: loggedInUser._id,
+    });
+
+    if (!project) {
+      return next(new Error("Authentication error: Project access denied"));
+    }
+
     socket.user = decoded;
+    socket.project = project;
 
     next();
   } catch (error) {
@@ -53,7 +69,7 @@ io.use(async (socket, next) => {
 io.on("connection", (socket) => {
   socket.roomId = socket.project._id.toString();
 
-  console.log("✓ User connected:", socket.id);
+  console.log("User connected:", socket.id);
 
   socket.join(socket.roomId);
 
@@ -95,7 +111,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log("✗ User disconnected");
+    console.log("User disconnected");
     socket.leave(socket.roomId);
   });
 });

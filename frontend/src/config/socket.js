@@ -5,6 +5,9 @@ let socketInstance = null;
 
 
 export const initializeSocket = (projectId) => {
+    if (socketInstance) {
+        socketInstance.disconnect();
+    }
 
     socketInstance = socket(import.meta.env.VITE_API_URL, {
         auth: {
@@ -20,9 +23,22 @@ export const initializeSocket = (projectId) => {
 }
 
 export const receiveMessage = (eventName, cb) => {
+    if (!socketInstance) return;
     socketInstance.on(eventName, cb);
 }
 
 export const sendMessage = (eventName, data) => {
+    if (!socketInstance) return;
     socketInstance.emit(eventName, data);
+}
+
+export const removeMessageListener = (eventName, cb) => {
+    if (!socketInstance) return;
+    socketInstance.off(eventName, cb);
+}
+
+export const disconnectSocket = () => {
+    if (!socketInstance) return;
+    socketInstance.disconnect();
+    socketInstance = null;
 }

@@ -78,7 +78,7 @@ export const addUsersToProject = async ({projectId, users, userId}) => {
 
 }
 
-export const getProjectById = async ({projectId}) => {
+export const getProjectById = async ({projectId, userId}) => {
   if (!projectId) {
     throw new Error("ProjectId is required");    
   }
@@ -87,14 +87,27 @@ export const getProjectById = async ({projectId}) => {
     throw new Error("Invalid projectId");    
   }
 
+  if (!userId) {
+    throw new Error("userId is required");    
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("Invalid userId");    
+  }
+
   const project = await projectModel.findOne({
-    _id: projectId
+    _id: projectId,
+    users: userId
   }).populate('users')
+
+  if (!project) {
+    throw new Error("Project not found or access denied");
+  }
 
   return project;
 }
 
-export const updateFileTree = async ({projectId, fileTree}) => {
+export const updateFileTree = async ({projectId, fileTree, userId}) => {
   if (!projectId) {
     throw new Error("ProjectId is required");    
   }
@@ -107,13 +120,26 @@ export const updateFileTree = async ({projectId, fileTree}) => {
     throw new Error("fileTree is required");
   }
 
+  if (!userId) {
+    throw new Error("userId is required");
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("Invalid userId");
+  }
+
   const project = await projectModel.findOneAndUpdate({
-    _id: projectId
+    _id: projectId,
+    users: userId
   }, {
     fileTree
   }, {
     new: true
   });
+
+  if (!project) {
+    throw new Error("Project not found or access denied");
+  }
 
   return project;
 }

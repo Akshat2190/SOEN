@@ -1,11 +1,13 @@
 /* eslint-disable no-unused-vars */
-import React, { useState, useEffect, useContext, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import React, { useState, useEffect, useContext, useRef, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import axios from "../config/axios";
 import {
   initializeSocket,
   receiveMessage,
   sendMessage,
+  removeMessageListener,
+  disconnectSocket,
 } from "../config/socket";
 import { UserContext } from "../context/user.context.jsx";
 import Markdown from "markdown-to-jsx";
@@ -25,12 +27,14 @@ function SyntaxHighlightedCode(props) {
 
 const Project = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useContext(UserContext);
+  const routeProject = location.state?.project;
 
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(new Set());
-  const [project, setProject] = useState(location.state.project);
+  const [project, setProject] = useState(routeProject || null);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]); // Add this line
   const messageBox = React.createRef();
@@ -45,12 +49,22 @@ const Project = () => {
 
   const [webContainer, setWebContainer] = useState(null);
   const [iframeUrl, setIframeUrl] = useState(null)
+  const webContainerRef = useRef(null);
   const didLoadProjectRef = useRef(false);
 
   useEffect(() => {
+    webContainerRef.current = webContainer;
+  }, [webContainer]);
+
+  useEffect(() => {
+    if (!project?._id) {
+      navigate("/", { replace: true });
+      return;
+    }
+
     initializeSocket(project._id);
 
-    if (!webContainer) {
+    if (!webContainerRef.current) {
       getWebContainer().then(container => {
         setWebContainer(container);
         console.log("container started")
@@ -59,11 +73,11 @@ const Project = () => {
       })
     }
 
-    receiveMessage("project-message", (data) => {
+    const handleProjectMessage = (data) => {
       try {
         const message = JSON.parse(data.message);
 
-        webContainer?.mount(message.fileTree); 
+        webContainerRef.current?.mount(message.fileTree); 
 
         if (message.fileTree) {
           // Transform the AI fileTree structure
@@ -80,10 +94,12 @@ const Project = () => {
       }
 
       setMessages((prevMessages) => [...prevMessages, data]);
-    });
+    };
+
+    receiveMessage("project-message", handleProjectMessage);
 
     axios
-      .get(`/projects/get-project/${location.state.project._id}`)
+      .get(`/projects/get-project/${project._id}`)
       .then((res) => {
         const fetchedProject = res.data.project;
         setProject(fetchedProject);
@@ -92,9 +108,7 @@ const Project = () => {
 
         const fileNames = Object.keys(fetchedProject?.fileTree || {});
         setOpenFiles(fileNames);
-        if (!currentFile && fileNames.length) {
-          setCurrentFile(fileNames[0]);
-        }
+        setCurrentFile((prevFile) => prevFile || fileNames[0] || null);
       })
       .catch((error) => {
         console.error("Failed to load project:", error);
@@ -102,7 +116,12 @@ const Project = () => {
     if (window.hljs) {
       window.hljs.configure({ ignoreUnescapedHTML: true });
     }
-  }, [location.state.project._id, project._id]);
+
+    return () => {
+      removeMessageListener("project-message", handleProjectMessage);
+      disconnectSocket();
+    };
+  }, [project?._id, navigate]);
 
   // Add auto-scroll effect
   useEffect(() => {
@@ -119,10 +138,11 @@ const Project = () => {
     }, 500);
 
     return () => clearTimeout(timeoutId);
-  }, [fileTree, currentFile]);
+  }, [fileTree, currentFile, saveFileTree]);
 
-  function saveFileTree(ft) {
+  const saveFileTree = useCallback((ft) => {
     if (!didLoadProjectRef.current) return;
+    if (!project?._id) return;
 
     axios.put("/projects/update-file-tree", {
       projectId: project._id,
@@ -132,7 +152,7 @@ const Project = () => {
     }).catch(err => {
       console.error("Failed to update file tree:", err);
     })
-  }
+  }, [project?._id]);
 
   const handleUserClick = (id) => {
     setSelectedUserId((prevSelectedUserId) => {
@@ -148,7 +168,7 @@ const Project = () => {
   };
 
   function addCollaborators() {
-    const projectId = location?.state?.project?._id;
+    const projectId = project?._id;
     if (!projectId) return console.warn("No project id");
     axios
       .put("/projects/add-user", {
@@ -206,6 +226,10 @@ const Project = () => {
         </Markdown>
       </div>
     );
+  }
+
+  if (!project) {
+    return <main className="h-screen w-screen flex items-center justify-center">Loading...</main>;
   }
 
   return (

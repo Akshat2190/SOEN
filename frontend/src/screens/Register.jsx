@@ -339,10 +339,10 @@ const Register = () => {
           {/* ── Social pills ── */}
           <div className="flex gap-2.5">
             {[
-              { id: "soen-social-google", label: "Google", Icon: GoogleIcon },
-              { id: "soen-social-apple",  label: "Apple",  Icon: AppleIcon  },
-              { id: "soen-social-twitter",label: "Twitter",Icon: XIcon      },
-            ].map(({ id, label, Icon }) => (
+              { id: "soen-social-google", label: "Google", icon: <GoogleIcon /> },
+              { id: "soen-social-apple",  label: "Apple",  icon: <AppleIcon />  },
+              { id: "soen-social-twitter",label: "Twitter",icon: <XIcon />      },
+            ].map(({ id, label, icon }) => (
               <button
                 key={label}
                 id={id}
@@ -355,7 +355,7 @@ const Register = () => {
                   color: "#ffffff",
                 }}
               >
-                <Icon />
+                {icon}
                 <span>{label}</span>
               </button>
             ))}
