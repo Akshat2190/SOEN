@@ -11,11 +11,17 @@ connect(); // Call the connect function to establish a database connection
 
 const app = express();
 const allowedOrigins = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(',').map((origin) => origin.trim())
+  ? process.env.CLIENT_URL.split(',').map((origin) => origin.trim().replace(/\/$/, ''))
   : [];
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+    const normalizedOrigin = origin?.replace(/\/$/, '');
+
+    if (
+      !origin ||
+      allowedOrigins.length === 0 ||
+      allowedOrigins.includes(normalizedOrigin)
+    ) {
       return callback(null, true);
     }
 

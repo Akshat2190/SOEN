@@ -10,7 +10,7 @@ import { generateResult } from "./services/ai.service.js";
 
 const port = process.env.PORT || 3000;
 const allowedOrigins = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(",").map((origin) => origin.trim())
+  ? process.env.CLIENT_URL.split(",").map((origin) => origin.trim().replace(/\/$/, ""))
   : ["*"];
 
 const server = http.createServer(app);
