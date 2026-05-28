@@ -1,13 +1,19 @@
-/* eslint-disable no-unused-vars */
-import React, { useState, useEffect, useContext, useRef, useCallback } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import axios from "../config/axios";
 import {
+  disconnectSocket,
   initializeSocket,
   receiveMessage,
-  sendMessage,
   removeMessageListener,
-  disconnectSocket,
+  sendMessage,
 } from "../config/socket";
 import { UserContext } from "../context/user.context.jsx";
 import Markdown from "markdown-to-jsx";
@@ -25,6 +31,28 @@ function SyntaxHighlightedCode(props) {
   return <code {...props} ref={ref} />;
 }
 
+const getUserId = (projectUser) =>
+  typeof projectUser === "string" ? projectUser : projectUser?._id;
+
+const getLanguage = (filename = "") => {
+  if (filename.endsWith(".js") || filename.endsWith(".jsx")) return "javascript";
+  if (filename.endsWith(".css")) return "css";
+  if (filename.endsWith(".html")) return "html";
+  if (filename.endsWith(".json")) return "json";
+  return "plaintext";
+};
+
+const highlightContents = (filename, contents) => {
+  if (!window?.hljs) return contents;
+
+  try {
+    return window.hljs.highlight(contents, { language: getLanguage(filename) }).value;
+  } catch (err) {
+    console.error("hljs highlight failed", err);
+    return contents;
+  }
+};
+
 const Project = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -36,21 +64,27 @@ const Project = () => {
   const [selectedUserId, setSelectedUserId] = useState(new Set());
   const [project, setProject] = useState(routeProject || null);
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState([]); // Add this line
-  const messageBox = React.createRef();
-  const codeRef = useRef(null);
-  const runProcessRef = useRef(null);
-
+  const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
   const [fileTree, setFileTree] = useState({});
   const [currentFile, setCurrentFile] = useState(null);
   const [openFiles, setOpenFiles] = useState([]);
   const [aiError, setAiError] = useState(null);
-
   const [webContainer, setWebContainer] = useState(null);
-  const [iframeUrl, setIframeUrl] = useState(null)
+  const [iframeUrl, setIframeUrl] = useState(null);
+  const [isRunning, setIsRunning] = useState(false);
+
+  const messageBoxRef = useRef(null);
+  const codeRef = useRef(null);
+  const runProcessRef = useRef(null);
   const webContainerRef = useRef(null);
   const didLoadProjectRef = useRef(false);
+
+  const fileNames = useMemo(() => Object.keys(fileTree || {}), [fileTree]);
+  const availableUsers = useMemo(() => {
+    const collaboratorIds = new Set((project?.users || []).map(getUserId));
+    return users.filter((candidate) => !collaboratorIds.has(candidate._id));
+  }, [project?.users, users]);
 
   useEffect(() => {
     webContainerRef.current = webContainer;
@@ -65,32 +99,29 @@ const Project = () => {
     initializeSocket(project._id);
 
     if (!webContainerRef.current) {
-      getWebContainer().then(container => {
-        setWebContainer(container);
-        console.log("container started")
-      }).catch(error => {
-        console.error("Failed to initialize WebContainer:", error);
-      })
+      getWebContainer()
+        .then((container) => {
+          setWebContainer(container);
+        })
+        .catch((error) => {
+          console.error("Failed to initialize WebContainer:", error);
+        });
     }
 
     const handleProjectMessage = (data) => {
-      try {
-        const message = JSON.parse(data.message);
+      if (data.sender?._id === "ai") {
+        try {
+          const parsedMessage = JSON.parse(data.message);
 
-        webContainerRef.current?.mount(message.fileTree); 
-
-        if (message.fileTree) {
-          // Transform the AI fileTree structure
-          const transformedFileTree = {};
-          Object.keys(message.fileTree).forEach((filename) => {
-            transformedFileTree[filename] = message.fileTree[filename];
-          });
-          setFileTree(transformedFileTree);
-          setAiError(null); // Clear any previous errors
+          if (parsedMessage.fileTree) {
+            webContainerRef.current?.mount(parsedMessage.fileTree);
+            setFileTree(parsedMessage.fileTree);
+            setAiError(null);
+          }
+        } catch (error) {
+          console.error("Error parsing AI message:", error);
+          setAiError("Could not process the AI response.");
         }
-      } catch (error) {
-        console.error("Error parsing message:", error);
-        setAiError("Failed to process AI response");
       }
 
       setMessages((prevMessages) => [...prevMessages, data]);
@@ -102,13 +133,14 @@ const Project = () => {
       .get(`/projects/get-project/${project._id}`)
       .then((res) => {
         const fetchedProject = res.data.project;
-        setProject(fetchedProject);
-        setFileTree(fetchedProject?.fileTree || {});
-        didLoadProjectRef.current = true;
+        const fetchedFileTree = fetchedProject?.fileTree || {};
+        const fetchedFiles = Object.keys(fetchedFileTree);
 
-        const fileNames = Object.keys(fetchedProject?.fileTree || {});
-        setOpenFiles(fileNames);
-        setCurrentFile((prevFile) => prevFile || fileNames[0] || null);
+        setProject(fetchedProject);
+        setFileTree(fetchedFileTree);
+        setOpenFiles(fetchedFiles);
+        setCurrentFile((prevFile) => prevFile || fetchedFiles[0] || null);
+        didLoadProjectRef.current = true;
       })
       .catch((error) => {
         console.error("Failed to load project:", error);
@@ -133,25 +165,28 @@ const Project = () => {
     };
   }, [project?._id, navigate]);
 
-  // Add auto-scroll effect
   useEffect(() => {
-    scrollToBottom();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (messageBoxRef.current) {
+      messageBoxRef.current.scrollTop = messageBoxRef.current.scrollHeight;
+    }
   }, [messages]);
 
-  const saveFileTree = useCallback((ft) => {
-    if (!didLoadProjectRef.current) return;
-    if (!project?._id) return;
+  const saveFileTree = useCallback(
+    (nextFileTree) => {
+      if (!didLoadProjectRef.current) return;
+      if (!project?._id) return;
 
-    axios.put("/projects/update-file-tree", {
-      projectId: project._id,
-      fileTree: ft
-    }).then(res => {
-      console.log("File tree updated successfully", res.data);
-    }).catch(err => {
-      console.error("Failed to update file tree:", err);
-    })
-  }, [project?._id]);
+      axios
+        .put("/projects/update-file-tree", {
+          projectId: project._id,
+          fileTree: nextFileTree,
+        })
+        .catch((err) => {
+          console.error("Failed to update file tree:", err);
+        });
+    },
+    [project?._id]
+  );
 
   useEffect(() => {
     if (!didLoadProjectRef.current) return;
@@ -164,35 +199,56 @@ const Project = () => {
     return () => clearTimeout(timeoutId);
   }, [fileTree, currentFile, saveFileTree]);
 
+  const handleOpenFile = (file) => {
+    setCurrentFile(file);
+    setOpenFiles((prevFiles) => [...new Set([...prevFiles, file])]);
+  };
+
+  const updateCurrentFileContents = (contents) => {
+    if (!currentFile || !fileTree[currentFile]) return;
+
+    setFileTree((prevTree) => ({
+      ...prevTree,
+      [currentFile]: {
+        ...prevTree[currentFile],
+        file: {
+          ...prevTree[currentFile].file,
+          contents,
+        },
+      },
+    }));
+  };
+
   const handleUserClick = (id) => {
     setSelectedUserId((prevSelectedUserId) => {
-      const newSelectedUserId = new Set(prevSelectedUserId);
-      if (newSelectedUserId.has(id)) {
-        newSelectedUserId.delete(id);
+      const nextSelectedUserId = new Set(prevSelectedUserId);
+
+      if (nextSelectedUserId.has(id)) {
+        nextSelectedUserId.delete(id);
       } else {
-        newSelectedUserId.add(id);
+        nextSelectedUserId.add(id);
       }
 
-      return newSelectedUserId;
+      return nextSelectedUserId;
     });
   };
 
-  function addCollaborators() {
+  const addCollaborators = () => {
     const projectId = project?._id;
-    if (!projectId) return console.warn("No project id");
+    if (!projectId) return;
+
     axios
       .put("/projects/add-user", {
         projectId,
         users: Array.from(selectedUserId),
       })
       .then((res) => {
-        console.log(res.data);
         setProject(res.data.project);
         setSelectedUserId(new Set());
         setIsModalOpen(false);
       })
       .catch(console.error);
-  }
+  };
 
   const send = () => {
     if (!message.trim()) return;
@@ -203,433 +259,492 @@ const Project = () => {
     };
 
     sendMessage("project-message", messageData);
-    appendOutGoingMessage(messageData);
+    setMessages((prev) => [...prev, { ...messageData, isOutgoing: true }]);
     setMessage("");
   };
 
-  function scrollToBottom() {
-    if (messageBox.current) {
-      messageBox.current.scrollTop = messageBox.current.scrollHeight;
+  const handleRunProject = async () => {
+    if (!webContainer) {
+      console.error("WebContainer is not ready yet");
+      return;
     }
-  }
 
-  function appendIncomingMessage(messageObject) {
-    setMessages((prev) => [...prev, { ...messageObject, isOutgoing: false }]);
-  }
+    const paths = Object.keys(fileTree || {});
+    if (!paths.length) {
+      console.error("No files available to run");
+      return;
+    }
 
-  function appendOutGoingMessage(messageObject) {
-    setMessages((prev) => [...prev, { ...messageObject, isOutgoing: true }]);
-  }
+    setIsRunning(true);
 
-  function writeAiMessage(message) {
-    const messageObject = JSON.parse(message);
-    console.log(message)
+    try {
+      if (runProcessRef.current) {
+        runProcessRef.current.kill();
+        runProcessRef.current = null;
+      }
 
-    return (
-      <div className="text-sm overflow-auto bg-slate-950 text-white rounded-sm break-words p-2">
-        <Markdown
-          options={{
-            overrides: {
-              code: SyntaxHighlightedCode,
+      await webContainer.mount(fileTree);
+
+      const packageJsonPath = paths.find((path) => path.endsWith("package.json"));
+      if (!packageJsonPath) {
+        console.error("No package.json found in generated files");
+        return;
+      }
+
+      const workingDirectory = packageJsonPath.includes("/")
+        ? packageJsonPath.split("/").slice(0, -1).join("/")
+        : ".";
+
+      let runArgs = ["start"];
+      try {
+        const packageJson = JSON.parse(fileTree[packageJsonPath]?.file?.contents || "{}");
+        if (!packageJson?.scripts?.start && packageJson?.scripts?.dev) {
+          runArgs = ["run", "dev"];
+        }
+      } catch (error) {
+        console.error("Failed to parse package.json:", error);
+      }
+
+      const installProcess = await webContainer.spawn("npm", ["install"], {
+        cwd: workingDirectory,
+      });
+
+      installProcess.output.pipeTo(
+        new WritableStream({
+          write(chunk) {
+            console.log(chunk);
+          },
+        })
+      );
+
+      const installExitCode = await installProcess.exit;
+      if (installExitCode !== 0) {
+        console.error("npm install failed", installExitCode);
+        return;
+      }
+
+      try {
+        const killProcess = await webContainer.spawn("npx", ["--yes", "kill-port", "3000"], {
+          cwd: workingDirectory,
+        });
+
+        killProcess.output.pipeTo(
+          new WritableStream({
+            write(chunk) {
+              console.log(chunk);
             },
-          }}
-        >
-          {messageObject.text}
-        </Markdown>
-      </div>
+          })
+        );
+
+        try {
+          await killProcess.exit;
+        } catch (error) {
+          console.warn("kill-port failed", error);
+        }
+      } catch (error) {
+        console.warn("Failed to spawn kill command", error);
+      }
+
+      const runProcess = await webContainer.spawn("npm", runArgs, {
+        cwd: workingDirectory,
+      });
+
+      runProcessRef.current = runProcess;
+
+      runProcess.output.pipeTo(
+        new WritableStream({
+          write(chunk) {
+            console.log(chunk);
+          },
+        })
+      );
+
+      runProcess.exit.finally(() => {
+        if (runProcessRef.current === runProcess) {
+          runProcessRef.current = null;
+        }
+        setIsRunning(false);
+      });
+
+      webContainer.on("server-ready", (port, url) => {
+        console.log(port, url);
+        setIframeUrl(url);
+      });
+    } catch (error) {
+      console.error("Failed to run project:", error);
+      setIsRunning(false);
+    }
+  };
+
+  const renderAiMessage = (rawMessage) => {
+    try {
+      const messageObject = JSON.parse(rawMessage);
+
+      return (
+        <div className="overflow-auto rounded-md bg-zinc-950 p-3 text-sm leading-relaxed text-zinc-50">
+          <Markdown
+            options={{
+              overrides: {
+                code: SyntaxHighlightedCode,
+              },
+            }}
+          >
+            {messageObject.text || rawMessage}
+          </Markdown>
+        </div>
+      );
+    } catch {
+      return <p className="text-sm leading-relaxed">{rawMessage}</p>;
+    }
+  };
+
+  if (!project) {
+    return (
+      <main className="flex h-screen w-screen items-center justify-center bg-[#f6f5f2] text-sm text-zinc-500">
+        Loading workspace...
+      </main>
     );
   }
 
-  if (!project) {
-    return <main className="h-screen w-screen flex items-center justify-center">Loading...</main>;
-  }
-
   return (
-    <main className="h-screen w-screen flex">
-      <section className="left relative flex flex-col h-screen min-w-80 bg-slate-300">
-        <header className="flex justify-between items-center p-2 px-4 w-full bg-slate-50 absolute top-0">
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex gap-2 items-center hover:bg-slate-200 rounded-md px-2 py-1"
-          >
-            <i className="ri-add-fill mr-1 text-xl"></i>
-            <p className="text-xs">Add Collaborator</p>
-          </button>
+    <main className="flex h-screen w-screen overflow-hidden bg-[#f6f5f2] text-zinc-950">
+      <aside className="relative flex h-full w-[360px] shrink-0 flex-col border-r border-zinc-200 bg-white">
+        <header className="border-b border-zinc-200 px-4 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+                Project
+              </p>
+              <h1 className="truncate text-lg font-semibold capitalize tracking-tight">
+                {project.name}
+              </h1>
+            </div>
+            <button
+              onClick={() => navigate("/")}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
+              title="Back"
+            >
+              <i className="ri-arrow-left-line text-lg" />
+            </button>
+          </div>
 
-          <button
-            onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
-            className="p-2"
-          >
-            <i className="ri-group-fill"></i>
-          </button>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-medium text-white transition hover:bg-zinc-800"
+            >
+              <i className="ri-user-add-line" />
+              Add
+            </button>
+            <button
+              onClick={() => setIsSidePanelOpen(true)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+            >
+              <i className="ri-group-line" />
+              Team
+            </button>
+          </div>
         </header>
 
-        <div className="conversation-area flex-grow flex flex-col overflow-hidden pt-16">
-          <div
-            ref={messageBox}
-            className="message-box p-1 flex-grow flex flex-col gap-1 overflow-y-auto scrollbar-hide"
-          >
-            {messages.map((msg, index) => (
-              <div
-                key={index}
-                className={`message max-w-60 break-words flex flex-col p-2 bg-slate-50 w-fit rounded-md ${
-                  msg.sender._id === user._id ? "ml-auto" : ""
-                }`}
-              >
-                <small className="opacity-65 text-xs">{msg.sender.email}</small>
-                {msg.sender._id === "ai" ? (
-                  writeAiMessage(msg.message)
-                ) : (
-                  <p className="text-sm break-words">{msg.message}</p>
-                )}
+        <div
+          ref={messageBoxRef}
+          className="message-box flex-1 space-y-3 overflow-y-auto px-3 py-4"
+        >
+          {messages.length === 0 && (
+            <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-500">
+              Start with a note or mention @ai.
+            </div>
+          )}
+
+          {messages.map((msg, index) => {
+            const isMine = msg.sender?._id === user?._id || msg.isOutgoing;
+            const isAi = msg.sender?._id === "ai";
+
+            return (
+              <div key={index} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[86%] rounded-md border px-3 py-2 ${
+                    isMine
+                      ? "border-zinc-950 bg-zinc-950 text-white"
+                      : "border-zinc-200 bg-white text-zinc-950"
+                  }`}
+                >
+                  <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] opacity-60">
+                    <span>{isAi ? "AI" : msg.sender?.email || "User"}</span>
+                  </div>
+                  {isAi ? renderAiMessage(msg.message) : <p className="text-sm">{msg.message}</p>}
+                </div>
               </div>
-            ))}
+            );
+          })}
+        </div>
+
+        {aiError && (
+          <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {aiError}
           </div>
-          <div className="inputField w-full flex bg-amber-50">
+        )}
+
+        <div className="border-t border-zinc-200 p-3">
+          <div className="flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-2 py-2 focus-within:border-zinc-950">
             <input
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              className="p-2 px-4 w-full border-none outline-none bg-amber-50"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") send();
+              }}
+              className="h-9 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none"
               type="text"
-              placeholder="Enter message"
+              placeholder="Message"
             />
-            <button onClick={send} className="px-5 bg-slate-950 text-white">
-              <i className="ri-send-plane-fill"></i>
+            <button
+              onClick={send}
+              className="flex h-9 w-9 items-center justify-center rounded-md bg-zinc-950 text-white transition hover:bg-zinc-800"
+              title="Send"
+            >
+              <i className="ri-send-plane-2-line" />
             </button>
           </div>
         </div>
 
         <div
-          className={`sidePanel w-full h-full flex flex-col gap-2 bg-slate-50 transition-all absolute ${
+          className={`absolute inset-0 z-20 flex flex-col bg-white transition-transform duration-200 ${
             isSidePanelOpen ? "translate-x-0" : "-translate-x-full"
-          } top-0`}
+          }`}
         >
-          <header className="flex justify-between items-center h-[6vw] px-3 bg-slate-200">
-            <h1 className="font-semibold text-lg">Collaborators</h1>
+          <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-4">
+            <div>
+              <h2 className="text-base font-semibold">Collaborators</h2>
+              <p className="text-sm text-zinc-500">{project.users?.length || 0} people</p>
+            </div>
             <button
-              onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
-              className="p-2"
+              onClick={() => setIsSidePanelOpen(false)}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
             >
-              <i className="ri-close-fill"></i>
+              <i className="ri-close-line text-xl" />
             </button>
           </header>
 
-          <div className="users flex flex-col gap-2">
-            {project.users &&
-              project.users.map((user) => {
-                return (
-                  <div
-                    key={user._id}
-                    className="user cursor-pointer flex hover:bg-slate-200 p-2 gap-2 items-center"
-                  >
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-white bg-slate-600">
-                      <i className="ri-user-fill" />
-                    </div>
-
-                    <h1 className="font-semibold text-lg">{user.email}</h1>
-                  </div>
-                );
-              })}
+          <div className="space-y-2 overflow-y-auto p-3">
+            {(project.users || []).map((projectUser) => (
+              <div
+                key={getUserId(projectUser)}
+                className="flex items-center gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-3"
+              >
+                <div className="flex h-9 w-9 items-center justify-center rounded-md bg-zinc-950 text-sm font-semibold text-white">
+                  {(projectUser.email || "U").slice(0, 1).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{projectUser.email || "Collaborator"}</p>
+                  <p className="text-xs text-zinc-500">Member</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-      </section>
+      </aside>
 
-      <section className="right bg-red-50 flex-grow h-full flex">
+      <section className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-zinc-100 text-zinc-700">
+              <i className="ri-folder-3-line" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold capitalize">{project.name}</p>
+              <p className="text-xs text-zinc-500">{fileNames.length} files</p>
+            </div>
+          </div>
 
-        <div className="explorer h-full min-w-52 max-w-64 bg-slate-400">
-          <div className="file-tree w-full">
-            {
-              Object.keys(fileTree).map((file) => (
-                <button 
-                 key={file}
-                 onClick={() => {
-                  setCurrentFile(file)
-                  setOpenFiles([ ...new Set([ ...openFiles, file ])]) 
-                 }} 
-                 className="tree-element cursor-pointer w-full p-2 px-4 flex items-center gap-2 bg-slate-200 ">
-                  <p className="font-semibold text-lg">{file}</p>
+          <button
+            onClick={handleRunProject}
+            disabled={isRunning || !fileNames.length}
+            className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <i className={isRunning ? "ri-loader-4-line animate-spin" : "ri-play-fill"} />
+            {isRunning ? "Running" : "Run"}
+          </button>
+        </header>
+
+        <div className="flex min-h-0 flex-1">
+          <aside className="hidden h-full w-60 shrink-0 border-r border-zinc-200 bg-[#fbfaf8] md:block">
+            <div className="flex h-11 items-center justify-between border-b border-zinc-200 px-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                Files
+              </p>
+            </div>
+
+            <div className="p-2">
+              {fileNames.length === 0 && (
+                <div className="rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500">
+                  No files yet.
+                </div>
+              )}
+
+              {fileNames.map((file) => (
+                <button
+                  key={file}
+                  onClick={() => handleOpenFile(file)}
+                  className={`flex h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm transition ${
+                    currentFile === file
+                      ? "bg-zinc-950 text-white"
+                      : "text-zinc-700 hover:bg-zinc-100"
+                  }`}
+                >
+                  <i className="ri-file-code-line shrink-0" />
+                  <span className="truncate">{file}</span>
                 </button>
-              ))
-            }
-          </div>
-        </div>
-        
-          <div className="code-editor flex flex-col flex-grow h-full">
+              ))}
+            </div>
+          </aside>
 
-              <div className="top flex justify-between w-full">
-
-                <div className="files flex">
-                  {
-                    openFiles.map((file) => (
-                      <button 
-                        key={file}
-                        onClick={() => setCurrentFile(file)} 
-                        className={`tab-element cursor-pointer p-2 px-4 border-b-2 ${currentFile === file ? 'border-blue-600 bg-slate-300' : 'border-transparent hover:bg-slate-200' }`}
-                      >
-                        <p className="font-semibold text-lg">{file}</p>
-                      </button>
-                    ))
-                  }
-                </div>
-
-                <div className="actions flex gap-2">
+          <section className="flex min-w-0 flex-1 flex-col bg-white">
+            <div className="flex h-11 shrink-0 items-center gap-1 overflow-x-auto border-b border-zinc-200 bg-[#fbfaf8] px-2">
+              {openFiles.length === 0 ? (
+                <p className="px-2 text-sm text-zinc-500">No file selected</p>
+              ) : (
+                openFiles.map((file) => (
                   <button
-                    onClick={async () => {
-                      if (!webContainer) {
-                        console.error("WebContainer is not ready yet");
-                        return;
-                      }
+                    key={file}
+                    onClick={() => setCurrentFile(file)}
+                    className={`flex h-8 max-w-48 items-center gap-2 rounded-md px-3 text-sm transition ${
+                      currentFile === file
+                        ? "bg-white text-zinc-950 shadow-sm ring-1 ring-zinc-200"
+                        : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950"
+                    }`}
+                  >
+                    <span className="truncate">{file}</span>
+                  </button>
+                ))
+              )}
+            </div>
 
-                      const filePaths = Object.keys(fileTree || {});
-                      if (!filePaths.length) {
-                        console.error("No files available to run");
-                        return;
-                      }
-
-                      if (runProcessRef.current) {
-                        try {
-                          runProcessRef.current.kill();
-                        } catch (e) {
-                          console.warn("Failed to stop previous run process", e);
-                        }
-                        runProcessRef.current = null;
-                      }
-
-                      await webContainer.mount(fileTree);
-
-                      const packageJsonPath = filePaths.find((path) => path.endsWith("package.json"));
-                      if (!packageJsonPath) {
-                        console.error("No package.json found in generated files");
-                        return;
-                      }
-
-                      const workingDirectory =
-                        packageJsonPath.includes("/")
-                          ? packageJsonPath.split("/").slice(0, -1).join("/")
-                          : ".";
-
-                      let runArgs = ["start"];
-                      try {
-                        const packageJson = JSON.parse(fileTree[packageJsonPath]?.file?.contents || "{}");
-                        if (!packageJson?.scripts?.start && packageJson?.scripts?.dev) {
-                          runArgs = ["run", "dev"];
-                        }
-                      } catch (error) {
-                        console.error("Failed to parse package.json:", error);
-                      }
-
-                      const installProcess = await webContainer.spawn("npm", ["install"], {
-                        cwd: workingDirectory,
-                      });
-
-                      installProcess.output.pipeTo(new WritableStream({
-                        write(chunk) {
-                          console.log(chunk);
-                        }
-                      }));
-
-                      const installExitCode = await installProcess.exit;
-                      if (installExitCode !== 0) {
-                        console.error("npm install failed", installExitCode);
-                        return;
-                      }
-
-                      // Attempt to kill any previous server running on common dev port before starting
-                      try {
-                        // Use --yes to auto-accept installing kill-port if npx prompts
-                        const killProcess = await webContainer.spawn("npx", ["--yes", "kill-port", "3000"], {
-                          cwd: workingDirectory,
-                        });
-
-                        killProcess.output.pipeTo(new WritableStream({
-                          write(chunk) {
-                            console.log(chunk);
-                          }
-                        }));
-
-                        // wait for kill to finish but ignore non-zero exit
-                        try { await killProcess.exit; } catch (e) { console.warn('kill-port failed', e); }
-                      } catch (e) {
-                        console.warn('Failed to spawn kill command', e);
-                      }
-
-                      const runProcess = await webContainer.spawn("npm", runArgs, {
-                        cwd: workingDirectory,
-                      });
-
-                      runProcessRef.current = runProcess;
-
-                      runProcess.output.pipeTo(new WritableStream({
-                        write(chunk) {
-                          console.log(chunk);
-                        }
-                      }));
-
-                      runProcess.exit.finally(() => {
-                        if (runProcessRef.current === runProcess) {
-                          runProcessRef.current = null;
-                        }
-                      });
-
-                      webContainer.on("server-ready", (port, url)=>{
-                        console.log(port, url);
-                        setIframeUrl(url);
-                      })
+            <div className="min-h-0 flex-1">
+              {currentFile && fileTree[currentFile] ? (
+                <pre className="h-full w-full overflow-auto bg-[#101214] p-4 text-sm leading-6 text-zinc-100">
+                  <code
+                    key={currentFile}
+                    ref={codeRef}
+                    className="hljs block min-h-full outline-none"
+                    contentEditable
+                    suppressContentEditableWarning
+                    onInput={(e) => {
+                      updateCurrentFileContents(e.target.innerText);
                     }}
-                    className="px-5 bg-slate-300 text-white"
-                    >run</button>
-
+                    onBlur={(e) => {
+                      const updatedContent = e.target.innerText;
+                      updateCurrentFileContents(updatedContent);
+                      e.target.innerHTML = highlightContents(currentFile, updatedContent);
+                    }}
+                    dangerouslySetInnerHTML={{
+                      __html: highlightContents(
+                        currentFile,
+                        fileTree[currentFile].file.contents || ""
+                      ),
+                    }}
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      paddingBottom: "18rem",
+                    }}
+                  />
+                </pre>
+              ) : (
+                <div className="flex h-full items-center justify-center bg-white">
+                  <div className="max-w-sm rounded-md border border-dashed border-zinc-300 p-6 text-center">
+                    <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-md bg-zinc-100 text-zinc-500">
+                      <i className="ri-file-code-line text-xl" />
+                    </div>
+                    <p className="mt-3 text-sm font-medium">No file open</p>
+                    <p className="mt-1 text-sm text-zinc-500">Ask AI to create files or select one.</p>
+                  </div>
                 </div>
-              </div>
-              <div className="bottom h-full">
-                {fileTree[currentFile] && (
-                  <pre className="h-full w-full overflow-auto bg-slate-100 p-4">
-                    <code
-                      ref={codeRef}
-                      className="hljs h-full outline-none"
-                      contentEditable
-                      suppressContentEditableWarning
-                      onInput={(e) => {
-                        const updatedContent = e.target.innerText;
-                        const ft = {
-                          ...fileTree,
-                          [currentFile]: {
-                            ...fileTree[currentFile],
-                            file: {
-                              ...fileTree[currentFile].file,
-                              contents: updatedContent,
-                            },
-                          },
-                        };
+              )}
+            </div>
+          </section>
 
-                        setFileTree(ft);
-                      }}
-                      onBlur={(e) => {
-                        const updatedContent = e.target.innerText;
-                        const ft = {
-                          ...fileTree,
-                          [currentFile]: {
-                            ...fileTree[currentFile],
-                            file: {
-                              ...fileTree[currentFile].file,
-                              contents: updatedContent,
-                            },
-                          },
-                        };
-
-                        setFileTree(ft);
-
-                        try {
-                          if (window && window.hljs) {
-                            const language = currentFile?.endsWith(".js")
-                              ? "javascript"
-                              : currentFile?.endsWith(".jsx")
-                                ? "javascript"
-                                : currentFile?.endsWith(".css")
-                                  ? "css"
-                                  : currentFile?.endsWith(".html")
-                                    ? "html"
-                                    : "plaintext";
-
-                            e.target.innerHTML = window.hljs.highlight(updatedContent, { language }).value;
-                          }
-                        } catch (err) {
-                          console.error("hljs highlight failed", err);
-                        }
-                      }}
-                      dangerouslySetInnerHTML={{
-                        __html: (() => {
-                          const contents = fileTree[currentFile].file.contents || "";
-
-                          try {
-                            if (window && window.hljs) {
-                              const language = currentFile?.endsWith(".js")
-                                ? "javascript"
-                                : currentFile?.endsWith(".jsx")
-                                  ? "javascript"
-                                  : currentFile?.endsWith(".css")
-                                    ? "css"
-                                    : currentFile?.endsWith(".html")
-                                      ? "html"
-                                      : "plaintext";
-
-                              return window.hljs.highlight(contents, { language }).value;
-                            }
-                          } catch (err) {
-                            console.error("hljs highlight failed", err);
-                          }
-
-                          return contents;
-                        })(),
-                      }}
-                      style={{
-                        whiteSpace: "pre-wrap",
-                        paddingBottom: "25rem",
-                        counterSet: "line-number",
-                      }}
-                    />
-                  </pre>
-                )}
-              </div>
-          </div>
-
-          {iframeUrl && webContainer && 
-            (<div className="flex flex-col min-w-96 h-full">
-              <div className="address-bar">
-                <input type="text"
+          {iframeUrl && webContainer && (
+            <aside className="hidden h-full w-[420px] shrink-0 flex-col border-l border-zinc-200 bg-white xl:flex">
+              <div className="flex h-11 items-center gap-2 border-b border-zinc-200 px-3">
+                <i className="ri-global-line text-zinc-500" />
+                <input
+                  type="text"
                   onChange={(e) => setIframeUrl(e.target.value)}
-                  value={iframeUrl} className="w-full p-2 px-4 bg-slate-200" />
+                  value={iframeUrl}
+                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-200 px-2 text-xs outline-none focus:border-zinc-950"
+                />
               </div>
-              <iframe src={iframeUrl} className="w-full h-full"></iframe>
-            </div>)
-          }
-        
+              <iframe src={iframeUrl} className="h-full w-full" title="Preview" />
+            </aside>
+          )}
+        </div>
       </section>
 
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-4 rounded-md w-96 max-w-full relative">
-            <header className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">Select User</h2>
-              <button onClick={() => setIsModalOpen(false)} className="p-2">
-                <i className="ri-close-fill"></i>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/40 px-4">
+          <div className="w-full max-w-md rounded-md border border-zinc-200 bg-white shadow-xl">
+            <header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
+              <div>
+                <h2 className="text-base font-semibold">Add Collaborators</h2>
+                <p className="text-sm text-zinc-500">{availableUsers.length} available</p>
+              </div>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
+              >
+                <i className="ri-close-line text-xl" />
               </button>
             </header>
-            <div className="users-list flex flex-col gap-2 mb-16 max-h-96 overflow-auto">
-              {users
-                .filter((user) => !project.users?.some((projectUser) => projectUser._id === user._id))
-                .map((user) => (
-                <div
-                  key={user._id}
-                  className={`user cursor-pointer hover:bg-slate-200 ${
-                    selectedUserId.has(user._id) ? "bg-slate-200" : ""
-                  } p-2 flex gap-2 items-center`}
-                  onClick={() => handleUserClick(user._id)}
+
+            <div className="max-h-96 space-y-2 overflow-auto p-3">
+              {availableUsers.map((candidate) => (
+                <button
+                  key={candidate._id}
+                  className={`flex w-full items-center gap-3 rounded-md border px-3 py-3 text-left transition ${
+                    selectedUserId.has(candidate._id)
+                      ? "border-zinc-950 bg-zinc-950 text-white"
+                      : "border-zinc-200 bg-white hover:bg-zinc-50"
+                  }`}
+                  onClick={() => handleUserClick(candidate._id)}
                 >
-                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-white bg-slate-600">
-                    <i className="ri-user-fill"></i>
+                  <div
+                    className={`flex h-9 w-9 items-center justify-center rounded-md text-sm font-semibold ${
+                      selectedUserId.has(candidate._id)
+                        ? "bg-white text-zinc-950"
+                        : "bg-zinc-100 text-zinc-700"
+                    }`}
+                  >
+                    {candidate.email.slice(0, 1).toUpperCase()}
                   </div>
-                  <h1 className="font-semibold text-sm truncate">
-                    {user.email}
-                  </h1>
-                  {selectedUserId.has(user._id) && (
-                    <i className="ri-check-line ml-auto" />
-                  )}
-                </div>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    {candidate.email}
+                  </span>
+                  {selectedUserId.has(candidate._id) && <i className="ri-check-line" />}
+                </button>
               ))}
-              {users.length === 0 && (
-                <p className="text-sm text-slate-500 text-center py-4">
-                  No users
-                </p>
+
+              {availableUsers.length === 0 && (
+                <div className="rounded-md border border-dashed border-zinc-300 p-5 text-center text-sm text-zinc-500">
+                  No users available.
+                </div>
               )}
             </div>
-            <button
-              disabled={!selectedUserId.size}
-              onClick={addCollaborators}
-              className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-blue-600 disabled:bg-blue-300 text-white rounded-md"
-            >
-              Add Collaborators
-            </button>
+
+            <footer className="flex justify-end gap-2 border-t border-zinc-200 px-5 py-4">
+              <button
+                type="button"
+                className="h-10 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                onClick={() => setIsModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!selectedUserId.size}
+                onClick={addCollaborators}
+                className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Add
+              </button>
+            </footer>
           </div>
         </div>
       )}
