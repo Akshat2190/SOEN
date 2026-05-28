@@ -129,17 +129,6 @@ const Project = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
-  useEffect(() => {
-    if (!didLoadProjectRef.current) return;
-    if (!currentFile || !fileTree[currentFile]) return;
-
-    const timeoutId = setTimeout(() => {
-      saveFileTree(fileTree);
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  }, [fileTree, currentFile, saveFileTree]);
-
   const saveFileTree = useCallback((ft) => {
     if (!didLoadProjectRef.current) return;
     if (!project?._id) return;
@@ -153,6 +142,17 @@ const Project = () => {
       console.error("Failed to update file tree:", err);
     })
   }, [project?._id]);
+
+  useEffect(() => {
+    if (!didLoadProjectRef.current) return;
+    if (!currentFile || !fileTree[currentFile]) return;
+
+    const timeoutId = setTimeout(() => {
+      saveFileTree(fileTree);
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [fileTree, currentFile, saveFileTree]);
 
   const handleUserClick = (id) => {
     setSelectedUserId((prevSelectedUserId) => {

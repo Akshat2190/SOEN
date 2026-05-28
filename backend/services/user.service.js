@@ -5,6 +5,14 @@ export const createUser = async ({ email, password }) => {
     throw new Error("Email and password are required");
   }
 
+  const existingUser = await userModel.findOne({ email });
+
+  if (existingUser) {
+    const error = new Error("User already exists");
+    error.statusCode = 409;
+    throw error;
+  }
+
   const hashedPassword = await userModel.hashPassword(password);
 
   const user = await userModel.create({
