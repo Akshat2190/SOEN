@@ -113,6 +113,16 @@ const Project = () => {
       .catch((error) => {
         console.error("Failed to load project:", error);
       });
+
+    axios
+      .get("/users/all")
+      .then((res) => {
+        setUsers(res.data.users || []);
+      })
+      .catch((error) => {
+        console.error("Failed to load users:", error);
+      });
+
     if (window.hljs) {
       window.hljs.configure({ ignoreUnescapedHTML: true });
     }
@@ -177,6 +187,8 @@ const Project = () => {
       })
       .then((res) => {
         console.log(res.data);
+        setProject(res.data.project);
+        setSelectedUserId(new Set());
         setIsModalOpen(false);
       })
       .catch(console.error);
@@ -584,7 +596,9 @@ const Project = () => {
               </button>
             </header>
             <div className="users-list flex flex-col gap-2 mb-16 max-h-96 overflow-auto">
-              {users.map((user) => (
+              {users
+                .filter((user) => !project.users?.some((projectUser) => projectUser._id === user._id))
+                .map((user) => (
                 <div
                   key={user._id}
                   className={`user cursor-pointer hover:bg-slate-200 ${

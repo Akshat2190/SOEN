@@ -72,7 +72,7 @@ export const addUsersToProject = async ({projectId, users, userId}) => {
     $addToSet: { users: { $each: users } }
   }, {
     new: true
-  })
+  }).populate('users')
 
   return updatedProject;
 
