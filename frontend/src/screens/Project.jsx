@@ -18,6 +18,8 @@ import {
 import { UserContext } from "../context/user.context.jsx";
 import Markdown from "markdown-to-jsx";
 import { getWebContainer } from "../config/webContainer.js";
+import { useTheme } from "../context/theme.context.jsx";
+import ThemeToggle from "../components/ThemeToggle.jsx";
 
 function SyntaxHighlightedCode(props) {
   const ref = useRef(null);
@@ -57,7 +59,29 @@ const Project = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useContext(UserContext);
+  const { isDark } = useTheme();
   const routeProject = location.state?.project;
+
+  const themeClass = {
+    page: isDark ? "bg-[#101114] text-zinc-50" : "bg-[#f6f5f2] text-zinc-950",
+    surface: isDark ? "border-zinc-800 bg-[#17191d]" : "border-zinc-200 bg-white",
+    surfaceAlt: isDark ? "border-zinc-800 bg-[#111318]" : "border-zinc-200 bg-[#fbfaf8]",
+    border: isDark ? "border-zinc-800" : "border-zinc-200",
+    soft: isDark ? "bg-zinc-800 text-zinc-200" : "bg-zinc-100 text-zinc-700",
+    muted: isDark ? "text-zinc-400" : "text-zinc-500",
+    primary: isDark
+      ? "bg-zinc-50 text-zinc-950 hover:bg-zinc-200"
+      : "bg-zinc-950 text-white hover:bg-zinc-800",
+    ghost: isDark
+      ? "border-zinc-700 text-zinc-200 hover:bg-zinc-800"
+      : "border-zinc-300 text-zinc-700 hover:bg-zinc-50",
+    input: isDark
+      ? "border-zinc-700 bg-[#101114] text-zinc-50 focus:border-zinc-300"
+      : "border-zinc-300 bg-white text-zinc-950 focus:border-zinc-950",
+    empty: isDark
+      ? "border-zinc-700 bg-[#111318] text-zinc-400"
+      : "border-zinc-300 bg-zinc-50 text-zinc-500",
+  };
 
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -400,19 +424,19 @@ const Project = () => {
 
   if (!project) {
     return (
-      <main className="flex h-screen w-screen items-center justify-center bg-[#f6f5f2] text-sm text-zinc-500">
+      <main className={`flex h-screen w-screen items-center justify-center text-sm ${themeClass.page} ${themeClass.muted}`}>
         Loading workspace...
       </main>
     );
   }
 
   return (
-    <main className="flex h-screen w-screen overflow-hidden bg-[#f6f5f2] text-zinc-950">
-      <aside className="relative flex h-full w-[360px] shrink-0 flex-col border-r border-zinc-200 bg-white">
-        <header className="border-b border-zinc-200 px-4 py-4">
+    <main className={`flex h-screen w-screen overflow-hidden transition-colors ${themeClass.page}`}>
+      <aside className={`relative flex h-full w-[360px] shrink-0 flex-col border-r ${themeClass.surface}`}>
+        <header className={`border-b px-4 py-4 ${themeClass.border}`}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+              <p className={`text-xs font-medium uppercase tracking-[0.14em] ${themeClass.muted}`}>
                 Project
               </p>
               <h1 className="truncate text-lg font-semibold capitalize tracking-tight">
@@ -421,7 +445,7 @@ const Project = () => {
             </div>
             <button
               onClick={() => navigate("/")}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
+              className={`flex h-9 w-9 items-center justify-center rounded-md transition ${themeClass.muted} ${isDark ? "hover:bg-zinc-800 hover:text-zinc-50" : "hover:bg-zinc-100 hover:text-zinc-950"}`}
               title="Back"
             >
               <i className="ri-arrow-left-line text-lg" />
@@ -431,14 +455,14 @@ const Project = () => {
           <div className="mt-4 grid grid-cols-2 gap-2">
             <button
               onClick={() => setIsModalOpen(true)}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-medium text-white transition hover:bg-zinc-800"
+              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition ${themeClass.primary}`}
             >
               <i className="ri-user-add-line" />
               Add
             </button>
             <button
               onClick={() => setIsSidePanelOpen(true)}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition ${themeClass.ghost}`}
             >
               <i className="ri-group-line" />
               Team
@@ -451,7 +475,7 @@ const Project = () => {
           className="message-box flex-1 space-y-3 overflow-y-auto px-3 py-4"
         >
           {messages.length === 0 && (
-            <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-500">
+            <div className={`rounded-md border border-dashed p-4 text-sm ${themeClass.empty}`}>
               Start with a note or mention @ai.
             </div>
           )}
@@ -465,8 +489,12 @@ const Project = () => {
                 <div
                   className={`max-w-[86%] rounded-md border px-3 py-2 ${
                     isMine
-                      ? "border-zinc-950 bg-zinc-950 text-white"
-                      : "border-zinc-200 bg-white text-zinc-950"
+                      ? isDark
+                        ? "border-zinc-50 bg-zinc-50 text-zinc-950"
+                        : "border-zinc-950 bg-zinc-950 text-white"
+                      : isDark
+                        ? "border-zinc-800 bg-[#111318] text-zinc-50"
+                        : "border-zinc-200 bg-white text-zinc-950"
                   }`}
                 >
                   <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] opacity-60">
@@ -485,8 +513,8 @@ const Project = () => {
           </div>
         )}
 
-        <div className="border-t border-zinc-200 p-3">
-          <div className="flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-2 py-2 focus-within:border-zinc-950">
+        <div className={`border-t p-3 ${themeClass.border}`}>
+          <div className={`flex items-center gap-2 rounded-md border px-2 py-2 ${themeClass.input}`}>
             <input
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -499,7 +527,7 @@ const Project = () => {
             />
             <button
               onClick={send}
-              className="flex h-9 w-9 items-center justify-center rounded-md bg-zinc-950 text-white transition hover:bg-zinc-800"
+              className={`flex h-9 w-9 items-center justify-center rounded-md transition ${themeClass.primary}`}
               title="Send"
             >
               <i className="ri-send-plane-2-line" />
@@ -508,18 +536,18 @@ const Project = () => {
         </div>
 
         <div
-          className={`absolute inset-0 z-20 flex flex-col bg-white transition-transform duration-200 ${
+          className={`absolute inset-0 z-20 flex flex-col transition-transform duration-200 ${isDark ? "bg-[#17191d]" : "bg-white"} ${
             isSidePanelOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-4">
+          <header className={`flex items-center justify-between border-b px-4 py-4 ${themeClass.border}`}>
             <div>
               <h2 className="text-base font-semibold">Collaborators</h2>
-              <p className="text-sm text-zinc-500">{project.users?.length || 0} people</p>
+              <p className={`text-sm ${themeClass.muted}`}>{project.users?.length || 0} people</p>
             </div>
             <button
               onClick={() => setIsSidePanelOpen(false)}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
+              className={`flex h-9 w-9 items-center justify-center rounded-md transition ${themeClass.muted} ${isDark ? "hover:bg-zinc-800 hover:text-zinc-50" : "hover:bg-zinc-100 hover:text-zinc-950"}`}
             >
               <i className="ri-close-line text-xl" />
             </button>
@@ -529,14 +557,14 @@ const Project = () => {
             {(project.users || []).map((projectUser) => (
               <div
                 key={getUserId(projectUser)}
-                className="flex items-center gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-3"
+                className={`flex items-center gap-3 rounded-md border px-3 py-3 ${themeClass.surfaceAlt}`}
               >
-                <div className="flex h-9 w-9 items-center justify-center rounded-md bg-zinc-950 text-sm font-semibold text-white">
+                <div className={`flex h-9 w-9 items-center justify-center rounded-md text-sm font-semibold ${themeClass.primary}`}>
                   {(projectUser.email || "U").slice(0, 1).toUpperCase()}
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{projectUser.email || "Collaborator"}</p>
-                  <p className="text-xs text-zinc-500">Member</p>
+                  <p className={`text-xs ${themeClass.muted}`}>Member</p>
                 </div>
               </div>
             ))}
@@ -545,38 +573,41 @@ const Project = () => {
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-4">
+        <header className={`flex h-16 shrink-0 items-center justify-between border-b px-4 ${themeClass.surface}`}>
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-zinc-100 text-zinc-700">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-md ${themeClass.soft}`}>
               <i className="ri-folder-3-line" />
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold capitalize">{project.name}</p>
-              <p className="text-xs text-zinc-500">{fileNames.length} files</p>
+              <p className={`text-xs ${themeClass.muted}`}>{fileNames.length} files</p>
             </div>
           </div>
 
-          <button
-            onClick={handleRunProject}
-            disabled={isRunning || !fileNames.length}
-            className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <i className={isRunning ? "ri-loader-4-line animate-spin" : "ri-play-fill"} />
-            {isRunning ? "Running" : "Run"}
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <button
+              onClick={handleRunProject}
+              disabled={isRunning || !fileNames.length}
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <i className={isRunning ? "ri-loader-4-line animate-spin" : "ri-play-fill"} />
+              {isRunning ? "Running" : "Run"}
+            </button>
+          </div>
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <aside className="hidden h-full w-60 shrink-0 border-r border-zinc-200 bg-[#fbfaf8] md:block">
-            <div className="flex h-11 items-center justify-between border-b border-zinc-200 px-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          <aside className={`hidden h-full w-60 shrink-0 border-r md:block ${themeClass.surfaceAlt}`}>
+            <div className={`flex h-11 items-center justify-between border-b px-3 ${themeClass.border}`}>
+              <p className={`text-xs font-semibold uppercase tracking-[0.14em] ${themeClass.muted}`}>
                 Files
               </p>
             </div>
 
             <div className="p-2">
               {fileNames.length === 0 && (
-                <div className="rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500">
+                <div className={`rounded-md border border-dashed p-3 text-sm ${themeClass.empty}`}>
                   No files yet.
                 </div>
               )}
@@ -587,8 +618,12 @@ const Project = () => {
                   onClick={() => handleOpenFile(file)}
                   className={`flex h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm transition ${
                     currentFile === file
-                      ? "bg-zinc-950 text-white"
-                      : "text-zinc-700 hover:bg-zinc-100"
+                      ? isDark
+                        ? "bg-zinc-50 text-zinc-950"
+                        : "bg-zinc-950 text-white"
+                      : isDark
+                        ? "text-zinc-300 hover:bg-zinc-800"
+                        : "text-zinc-700 hover:bg-zinc-100"
                   }`}
                 >
                   <i className="ri-file-code-line shrink-0" />
@@ -598,10 +633,10 @@ const Project = () => {
             </div>
           </aside>
 
-          <section className="flex min-w-0 flex-1 flex-col bg-white">
-            <div className="flex h-11 shrink-0 items-center gap-1 overflow-x-auto border-b border-zinc-200 bg-[#fbfaf8] px-2">
+          <section className={`flex min-w-0 flex-1 flex-col ${isDark ? "bg-[#17191d]" : "bg-white"}`}>
+            <div className={`flex h-11 shrink-0 items-center gap-1 overflow-x-auto border-b px-2 ${themeClass.surfaceAlt}`}>
               {openFiles.length === 0 ? (
-                <p className="px-2 text-sm text-zinc-500">No file selected</p>
+                <p className={`px-2 text-sm ${themeClass.muted}`}>No file selected</p>
               ) : (
                 openFiles.map((file) => (
                   <button
@@ -609,8 +644,12 @@ const Project = () => {
                     onClick={() => setCurrentFile(file)}
                     className={`flex h-8 max-w-48 items-center gap-2 rounded-md px-3 text-sm transition ${
                       currentFile === file
-                        ? "bg-white text-zinc-950 shadow-sm ring-1 ring-zinc-200"
-                        : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950"
+                        ? isDark
+                          ? "bg-[#17191d] text-zinc-50 shadow-sm ring-1 ring-zinc-700"
+                          : "bg-white text-zinc-950 shadow-sm ring-1 ring-zinc-200"
+                        : isDark
+                          ? "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
+                          : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950"
                     }`}
                   >
                     <span className="truncate">{file}</span>
@@ -649,13 +688,13 @@ const Project = () => {
                   />
                 </pre>
               ) : (
-                <div className="flex h-full items-center justify-center bg-white">
-                  <div className="max-w-sm rounded-md border border-dashed border-zinc-300 p-6 text-center">
-                    <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-md bg-zinc-100 text-zinc-500">
+                <div className={`flex h-full items-center justify-center ${isDark ? "bg-[#17191d]" : "bg-white"}`}>
+                  <div className={`max-w-sm rounded-md border border-dashed p-6 text-center ${themeClass.empty}`}>
+                    <div className={`mx-auto flex h-10 w-10 items-center justify-center rounded-md ${themeClass.soft}`}>
                       <i className="ri-file-code-line text-xl" />
                     </div>
                     <p className="mt-3 text-sm font-medium">No file open</p>
-                    <p className="mt-1 text-sm text-zinc-500">Ask AI to create files or select one.</p>
+                    <p className={`mt-1 text-sm ${themeClass.muted}`}>Ask AI to create files or select one.</p>
                   </div>
                 </div>
               )}
@@ -663,14 +702,14 @@ const Project = () => {
           </section>
 
           {iframeUrl && webContainer && (
-            <aside className="hidden h-full w-[420px] shrink-0 flex-col border-l border-zinc-200 bg-white xl:flex">
-              <div className="flex h-11 items-center gap-2 border-b border-zinc-200 px-3">
-                <i className="ri-global-line text-zinc-500" />
+            <aside className={`hidden h-full w-[420px] shrink-0 flex-col border-l xl:flex ${themeClass.surface}`}>
+              <div className={`flex h-11 items-center gap-2 border-b px-3 ${themeClass.border}`}>
+                <i className={`ri-global-line ${themeClass.muted}`} />
                 <input
                   type="text"
                   onChange={(e) => setIframeUrl(e.target.value)}
                   value={iframeUrl}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-zinc-200 px-2 text-xs outline-none focus:border-zinc-950"
+                  className={`h-8 min-w-0 flex-1 rounded-md border px-2 text-xs outline-none ${themeClass.input}`}
                 />
               </div>
               <iframe src={iframeUrl} className="h-full w-full" title="Preview" />
@@ -681,15 +720,15 @@ const Project = () => {
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/40 px-4">
-          <div className="w-full max-w-md rounded-md border border-zinc-200 bg-white shadow-xl">
-            <header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
+          <div className={`w-full max-w-md rounded-md border shadow-xl ${themeClass.surface}`}>
+            <header className={`flex items-center justify-between border-b px-5 py-4 ${themeClass.border}`}>
               <div>
                 <h2 className="text-base font-semibold">Add Collaborators</h2>
-                <p className="text-sm text-zinc-500">{availableUsers.length} available</p>
+                <p className={`text-sm ${themeClass.muted}`}>{availableUsers.length} available</p>
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
+                className={`flex h-9 w-9 items-center justify-center rounded-md transition ${themeClass.muted} ${isDark ? "hover:bg-zinc-800 hover:text-zinc-50" : "hover:bg-zinc-100 hover:text-zinc-950"}`}
               >
                 <i className="ri-close-line text-xl" />
               </button>
@@ -702,7 +741,9 @@ const Project = () => {
                   className={`flex w-full items-center gap-3 rounded-md border px-3 py-3 text-left transition ${
                     selectedUserId.has(candidate._id)
                       ? "border-zinc-950 bg-zinc-950 text-white"
-                      : "border-zinc-200 bg-white hover:bg-zinc-50"
+                      : isDark
+                        ? "border-zinc-800 bg-[#111318] hover:bg-zinc-800"
+                        : "border-zinc-200 bg-white hover:bg-zinc-50"
                   }`}
                   onClick={() => handleUserClick(candidate._id)}
                 >
@@ -710,7 +751,7 @@ const Project = () => {
                     className={`flex h-9 w-9 items-center justify-center rounded-md text-sm font-semibold ${
                       selectedUserId.has(candidate._id)
                         ? "bg-white text-zinc-950"
-                        : "bg-zinc-100 text-zinc-700"
+                        : themeClass.soft
                     }`}
                   >
                     {candidate.email.slice(0, 1).toUpperCase()}
@@ -723,16 +764,16 @@ const Project = () => {
               ))}
 
               {availableUsers.length === 0 && (
-                <div className="rounded-md border border-dashed border-zinc-300 p-5 text-center text-sm text-zinc-500">
+                <div className={`rounded-md border border-dashed p-5 text-center text-sm ${themeClass.empty}`}>
                   No users available.
                 </div>
               )}
             </div>
 
-            <footer className="flex justify-end gap-2 border-t border-zinc-200 px-5 py-4">
+            <footer className={`flex justify-end gap-2 border-t px-5 py-4 ${themeClass.border}`}>
               <button
                 type="button"
-                className="h-10 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                className={`h-10 rounded-md border px-4 text-sm font-medium transition ${themeClass.ghost}`}
                 onClick={() => setIsModalOpen(false)}
               >
                 Cancel
@@ -740,7 +781,7 @@ const Project = () => {
               <button
                 disabled={!selectedUserId.size}
                 onClick={addCollaborators}
-                className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className={`h-10 rounded-md px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${themeClass.primary}`}
               >
                 Add
               </button>
