@@ -4,6 +4,7 @@ import axios from "../config/axios";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../context/theme.context.jsx";
 import ThemeToggle from "../components/ThemeToggle.jsx";
+import DeploymentDoctor from "../components/DeploymentDoctor.jsx";
 
 const Home = () => {
   const { user, setUser } = useContext(UserContext);
@@ -220,6 +221,10 @@ const Home = () => {
             ))}
           </div>
         </section>
+
+        <div className="mt-6">
+          <DeploymentDoctor isDark={isDark} projectsCount={projects.length} />
+        </div>
       </div>
 
       {isModalOpen && (

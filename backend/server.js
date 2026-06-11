@@ -6,17 +6,16 @@ import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import projectModel from "./models/project.model.js";
 import userModel from "./models/user.model.js";
-import { generateResult } from "./services/ai.service.js";
+import { generateResultWithProjectMemory } from "./services/ai.service.js";
+import { getProjectMemoryContext } from "./services/project.service.js";
+import { getAllowedOrigins } from "./config/cors.js";
 
 const port = process.env.PORT || 3000;
-const allowedOrigins = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(",").map((origin) => origin.trim().replace(/\/$/, ""))
-  : ["*"];
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: getAllowedOrigins(),
     credentials: true,
   },
 });
@@ -73,6 +72,8 @@ io.on("connection", (socket) => {
 
   socket.join(socket.roomId);
 
+  const isSameProjectRoom = (projectId) => !projectId || projectId === socket.roomId;
+
   socket.on("project-message", async (data) => {
     const message = data.message;
 
@@ -82,8 +83,14 @@ io.on("connection", (socket) => {
     if (aiIsPresentInMessage) {
       try {
         const prompt = message.replace("@ai", "");
+        const currentProject = await projectModel.findById(socket.project._id);
+        const projectMemory = getProjectMemoryContext(currentProject);
 
-        const result = await generateResult(prompt);
+        const result = await generateResultWithProjectMemory({
+          prompt,
+          projectMemory,
+          fileTree: currentProject?.fileTree,
+        });
 
         io.to(socket.roomId).emit("project-message", {
           message: result,
@@ -93,12 +100,20 @@ io.on("connection", (socket) => {
           },
         });
       } catch (error) {
-        console.error("AI Error:", error.message);
+        console.error("AI Error:", {
+          message: error.message,
+          code: error.code,
+          status: error.status,
+          model: error.aiModel,
+        });
+
+        const aiMessage = error.code === "AI_CONFIG_MISSING"
+          ? "AI is not configured on the server. Add GOOGLE_AI_KEY and restart the backend."
+          : "Sorry, the AI service is currently unavailable. Please try again later.";
 
         // Send error message to client
         io.to(socket.roomId).emit("project-message", {
-          message:
-            "Sorry, the AI service is currently unavailable. Please try again later.",
+          message: aiMessage,
           sender: {
             _id: "ai",
             email: "AI",
@@ -107,6 +122,81 @@ io.on("connection", (socket) => {
       }
 
       return;
+    }
+  });
+
+  socket.on("whiteboard:draw", (data) => {
+    if (!isSameProjectRoom(data?.projectId) || !data?.object) {
+      return;
+    }
+
+    socket.broadcast.to(socket.roomId).emit("whiteboard:draw", {
+      object: data.object,
+      userId: socket.user.email,
+      email: socket.user.email,
+    });
+  });
+
+  socket.on("whiteboard:cursor", (data) => {
+    if (!isSameProjectRoom(data?.projectId) || typeof data.x !== "number" || typeof data.y !== "number") {
+      return;
+    }
+
+    socket.broadcast.to(socket.roomId).emit("whiteboard:cursor", {
+      userId: socket.user.email,
+      email: socket.user.email,
+      userName: socket.user.email,
+      x: data.x,
+      y: data.y,
+    });
+  });
+
+  socket.on("whiteboard:sync", async (data) => {
+    if (!isSameProjectRoom(data?.projectId) || !Array.isArray(data.state)) {
+      return;
+    }
+
+    socket.broadcast.to(socket.roomId).emit("whiteboard:sync", {
+      state: data.state,
+      userId: socket.user.email,
+      email: socket.user.email,
+    });
+
+    try {
+      await projectModel.updateOne(
+        {
+          _id: socket.roomId,
+        },
+        {
+          whiteboardState: data.state,
+        }
+      );
+    } catch (error) {
+      console.warn("whiteboard sync save failed", error.message);
+    }
+  });
+
+  socket.on("whiteboard:clear", async (data) => {
+    if (!isSameProjectRoom(data?.projectId)) {
+      return;
+    }
+
+    socket.broadcast.to(socket.roomId).emit("whiteboard:clear", {
+      userId: socket.user.email,
+      email: socket.user.email,
+    });
+
+    try {
+      await projectModel.updateOne(
+        {
+          _id: socket.roomId,
+        },
+        {
+          whiteboardState: [],
+        }
+      );
+    } catch (error) {
+      console.warn("whiteboard clear save failed", error.message);
     }
   });
 

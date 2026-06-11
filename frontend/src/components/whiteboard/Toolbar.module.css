@@ -1,0 +1,87 @@
+.toolbar {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+  background: #1c1c1f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  font-family: 'Inter', system-ui, sans-serif;
+  user-select: none;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE 10+ */
+}
+
+.toolbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+.toolButton {
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #8a8a93;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.toolButton:hover {
+  background: #2c2c2f;
+  color: #ffffff;
+}
+
+.toolButton.activeTool {
+  background: #2d2d30;
+  color: #ffffff;
+}
+
+.toolButton.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.toolButton.disabled:hover {
+  background: transparent;
+  color: #8a8a93;
+}
+
+.separator {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 2px 2px;
+}
+
+.shortcut {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 7px;
+  font-weight: 600;
+  color: #5a5a5e;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+}
+
+.toolButton:hover .shortcut {
+  color: #8a8a93;
+}
+
+.toolButton.activeTool .shortcut {
+  color: #8a8a93;
+}

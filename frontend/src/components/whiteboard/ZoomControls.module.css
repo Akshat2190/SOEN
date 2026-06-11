@@ -1,0 +1,55 @@
+.zoomContainer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #1c1c1f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 3px 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  user-select: none;
+}
+
+.zoomBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: #8a8a93;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+  outline: none;
+  padding: 0;
+}
+
+.zoomBtn:hover {
+  background: #2c2c2f;
+  color: #ffffff;
+}
+
+.zoomText {
+  width: 50px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 550;
+  color: #ffffff;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: all 0.12s ease;
+  outline: none;
+}
+
+.zoomText:hover {
+  background: #2c2c2f;
+}

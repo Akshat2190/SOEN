@@ -41,7 +41,7 @@ const Login = () => {
         console.log(res.data);
         localStorage.setItem("token", res.data.token);
         setUser(res.data.user);
-        navigate("/");
+        navigate("/home");
       })
       .catch((err) => {
         console.log(err?.response?.data);
@@ -133,7 +133,7 @@ const Login = () => {
             <div>
               <button
                 id="login-back-btn"
-                onClick={() => console.log("back")}
+                onClick={() => navigate("/")}
                 style={{
                   background: "none",
                   border: "none",
@@ -183,6 +183,7 @@ const Login = () => {
               {/* Email input */}
               <input
                 id="login-email"
+                className="login-input"
                 type="email"
                 placeholder="Enter email"
                 value={email}
@@ -196,6 +197,7 @@ const Login = () => {
               {/* Password input */}
               <input
                 id="login-password"
+                className="login-input"
                 type="password"
                 placeholder="Enter password"
                 value={password}
@@ -378,6 +380,25 @@ const Login = () => {
         #login-email::placeholder,
         #login-password::placeholder {
           color: #aaa;
+        }
+        .login-input {
+          display: block !important;
+          width: 100% !important;
+          height: 44px !important;
+          background: #f0eeeb !important;
+          border: 1px solid transparent !important;
+          border-radius: 8px !important;
+          padding: 12px 16px !important;
+          font-size: 14px !important;
+          color: #333 !important;
+          outline: none !important;
+          box-sizing: border-box !important;
+          appearance: none !important;
+          -webkit-appearance: none !important;
+        }
+        .login-input:focus {
+          border-color: rgba(139, 105, 20, 0.35) !important;
+          box-shadow: 0 0 0 3px rgba(139, 105, 20, 0.12) !important;
         }
         #login-email:-webkit-autofill,
         #login-password:-webkit-autofill {

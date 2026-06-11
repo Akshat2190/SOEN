@@ -6,22 +6,14 @@ import projectRoutes from './routes/project.routes.js'; // Import project routes
 import aiRoutes from './routes/ai.routes.js'; // Import AI routes
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
+import { isOriginAllowed } from './config/cors.js';
 
 connect(); // Call the connect function to establish a database connection
 
 const app = express();
-const allowedOrigins = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(',').map((origin) => origin.trim().replace(/\/$/, ''))
-  : [];
 const corsOptions = {
   origin(origin, callback) {
-    const normalizedOrigin = origin?.replace(/\/$/, '');
-
-    if (
-      !origin ||
-      allowedOrigins.length === 0 ||
-      allowedOrigins.includes(normalizedOrigin)
-    ) {
+    if (isOriginAllowed(origin)) {
       return callback(null, true);
     }
 

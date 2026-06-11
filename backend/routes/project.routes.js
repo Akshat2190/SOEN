@@ -34,4 +34,31 @@ router.put("/update-file-tree", authMiddleware.authUser, //"/update-file-tree/:p
     body('fileTree').isObject().withMessage('fileTree is required and must be an object'),
     projectController.updateFileTree);
 
+router.get("/get-whiteboard/:projectId",
+    authMiddleware.authUser,
+    projectController.getWhiteboardState);
+
+router.put("/update-whiteboard",
+    authMiddleware.authUser,
+    body('projectId').isString().withMessage('ProjectId is required'),
+    body('state').isArray().withMessage('state is required and must be an array'),
+    projectController.updateWhiteboardState);
+
+router.put("/update-memory",
+    authMiddleware.authUser,
+    body('projectId').isString().withMessage('ProjectId is required'),
+    body('memory').isObject().withMessage('memory is required and must be an object'),
+    projectController.updateProjectMemory);
+
+router.post("/generate-memory",
+    authMiddleware.authUser,
+    body('projectId').isString().withMessage('ProjectId is required'),
+    projectController.generateProjectMemory);
+
+router.post("/suggest-memory",
+    authMiddleware.authUser,
+    body('projectId').isString().withMessage('ProjectId is required'),
+    body('content').isString().trim().isLength({ min: 3 }).withMessage('content is required'),
+    projectController.suggestProjectMemory);
+
 export default router;

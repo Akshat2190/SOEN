@@ -183,6 +183,9 @@ const Register = () => {
   const [password, setPassword] = useState("");
   const [agreed, setAgreed]   = useState(false);
 
+  /* ─── tiny style objects ────────────────────────────────────────── */
+  const dmSans = { fontFamily: "'DM Sans', sans-serif" };
+
   const { setUser } = useContext(UserContext);
   const navigate    = useNavigate();
 
@@ -196,7 +199,7 @@ const Register = () => {
         console.log(res.data);
         localStorage.setItem("token", res.data.token);
         setUser(res.data.user);
-        navigate("/");
+        navigate("/home");
       })
       .catch((err) => {
         console.log(err.response?.data);
@@ -336,7 +339,7 @@ const Register = () => {
           {/* ── Divider ── */}
           <Divider label="or sign up via" />
 
-          {/* ── Social pills ── */}
+          {/* ── Social pills ──
           <div className="flex gap-2.5">
             {[
               { id: "soen-social-google", label: "Google", icon: <GoogleIcon /> },
@@ -359,7 +362,7 @@ const Register = () => {
                 <span>{label}</span>
               </button>
             ))}
-          </div>
+          </div> */}
 
           {/* ── Footer ── */}
           <p
@@ -375,6 +378,26 @@ const Register = () => {
               Login
             </Link>
           </p>
+          {/* Back button */}
+          <button
+              id="login-back-btn"
+              onClick={() => navigate("/")}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                fontSize: "13px",
+                color: "#666",
+                padding: 0,
+                marginBottom: "24px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                ...dmSans,
+              }}
+            >
+              ← Back
+          </button>
         </div>
 
         {/* ══════ RIGHT PANEL — atmospheric visual ══════ */}

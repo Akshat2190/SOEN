@@ -20,6 +20,7 @@ import Markdown from "markdown-to-jsx";
 import { getWebContainer } from "../config/webContainer.js";
 import { useTheme } from "../context/theme.context.jsx";
 import ThemeToggle from "../components/ThemeToggle.jsx";
+import Whiteboard from "../components/whiteboard/Whiteboard.jsx";
 
 function SyntaxHighlightedCode(props) {
   const ref = useRef(null);
@@ -55,6 +56,317 @@ const highlightContents = (filename, contents) => {
   }
 };
 
+const parseJsonSafely = (value) => {
+  if (typeof value !== "string") return null;
+
+  const cleanedValue = value
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(cleanedValue);
+  } catch (error) {
+    void error;
+  }
+
+  const firstBrace = cleanedValue.indexOf("{");
+  const lastBrace = cleanedValue.lastIndexOf("}");
+
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(cleanedValue.slice(firstBrace, lastBrace + 1));
+  } catch {
+    return null;
+  }
+};
+
+const isPlainObject = (value) =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const normalizeFileContents = (name, contents) => {
+  const value = typeof contents === "string" ? contents : String(contents ?? "");
+
+  if (!name.endsWith("package.json")) return value;
+
+  const candidates = [
+    value,
+    value.replace(/,\s*\\"/g, ', "'),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.stringify(JSON.parse(candidate), null, 2);
+    } catch (error) {
+      void error;
+    }
+  }
+
+  return value;
+};
+
+const insertFileTreeNode = (tree, path, node) => {
+  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+
+  if (!parts.length) return tree;
+
+  let cursor = tree;
+
+  parts.slice(0, -1).forEach((part) => {
+    if (!isPlainObject(cursor[part]?.directory)) {
+      cursor[part] = { directory: {} };
+    }
+
+    cursor = cursor[part].directory;
+  });
+
+  cursor[parts[parts.length - 1]] = node;
+  return tree;
+};
+
+const sanitizeFileTreeNode = (node, name = "") => {
+  if (typeof node === "string") {
+    return {
+      file: {
+        contents: normalizeFileContents(name, node),
+      },
+    };
+  }
+
+  if (!isPlainObject(node)) return null;
+
+  if (isPlainObject(node.file)) {
+    return {
+      file: {
+        contents: normalizeFileContents(name, node.file.contents),
+      },
+    };
+  }
+
+  if ("contents" in node) {
+    return {
+      file: {
+        contents: normalizeFileContents(name, node.contents),
+      },
+    };
+  }
+
+  if (isPlainObject(node.directory)) {
+    const directory = sanitizeFileTree(node.directory);
+    return Object.keys(directory).length ? { directory } : null;
+  }
+
+  const directory = sanitizeFileTree(node);
+  return Object.keys(directory).length ? { directory } : null;
+};
+
+const sanitizeFileTree = (tree) => {
+  if (!isPlainObject(tree)) return {};
+
+  return Object.entries(tree).reduce((safeTree, [name, node]) => {
+    const safeNode = sanitizeFileTreeNode(node, name);
+
+    if (safeNode) {
+      insertFileTreeNode(safeTree, name, safeNode);
+    }
+
+    return safeTree;
+  }, {});
+};
+
+const aiMetadataKeys = new Set([
+  "text",
+  "fileTree",
+  "buildCommand",
+  "startCommand",
+  "commands",
+]);
+
+const extractAiFileTree = (messageObject) => {
+  if (!isPlainObject(messageObject)) return {};
+
+  const safeTree = sanitizeFileTree(messageObject.fileTree || {});
+
+  Object.entries(messageObject).forEach(([name, node]) => {
+    if (aiMetadataKeys.has(name)) return;
+
+    const safeNode = sanitizeFileTreeNode(node, name);
+    if (safeNode) {
+      insertFileTreeNode(safeTree, name, safeNode);
+    }
+  });
+
+  return safeTree;
+};
+
+const listFileTreePaths = (tree, prefix = "") => {
+  if (!isPlainObject(tree)) return [];
+
+  return Object.entries(tree).flatMap(([name, node]) => {
+    const path = prefix ? `${prefix}/${name}` : name;
+
+    if (isPlainObject(node?.file)) return [path];
+    if (isPlainObject(node?.directory)) return listFileTreePaths(node.directory, path);
+    return [];
+  });
+};
+
+const getFileTreeFile = (tree, path) => {
+  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+  let cursor = tree;
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const node = cursor?.[parts[index]];
+
+    if (!node) return null;
+    if (index === parts.length - 1) return node.file || null;
+
+    cursor = node.directory;
+  }
+
+  return null;
+};
+
+const updateFileTreeFileContents = (tree, path, contents) => {
+  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (!parts.length) return tree;
+
+  const nextTree = { ...tree };
+  let cursor = nextTree;
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    const node = cursor[part];
+
+    if (!node) return tree;
+
+    if (index === parts.length - 1) {
+      cursor[part] = {
+        ...node,
+        file: {
+          ...node.file,
+          contents,
+        },
+      };
+      return nextTree;
+    }
+
+    cursor[part] = {
+      ...node,
+      directory: {
+        ...node.directory,
+      },
+    };
+    cursor = cursor[part].directory;
+  }
+
+  return nextTree;
+};
+
+const emptyProjectMemory = {
+  goal: "",
+  stack: "",
+  decisions: [],
+  knownIssues: [],
+  deploymentNotes: [],
+  nextSteps: [],
+};
+
+const memoryListFields = [
+  { key: "decisions", label: "Decisions" },
+  { key: "knownIssues", label: "Known Issues" },
+  { key: "deploymentNotes", label: "Deployment Notes" },
+  { key: "nextSteps", label: "Next Steps" },
+];
+
+const normalizeMemory = (memory = {}) => ({
+  goal: memory.goal || "",
+  stack: memory.stack || "",
+  decisions: Array.isArray(memory.decisions) ? memory.decisions : [],
+  knownIssues: Array.isArray(memory.knownIssues) ? memory.knownIssues : [],
+  deploymentNotes: Array.isArray(memory.deploymentNotes) ? memory.deploymentNotes : [],
+  nextSteps: Array.isArray(memory.nextSteps) ? memory.nextSteps : [],
+});
+
+const memoryToDraft = (memory) => {
+  const normalizedMemory = normalizeMemory(memory);
+
+  return {
+    goal: normalizedMemory.goal,
+    stack: normalizedMemory.stack,
+    decisions: normalizedMemory.decisions.join("\n"),
+    knownIssues: normalizedMemory.knownIssues.join("\n"),
+    deploymentNotes: normalizedMemory.deploymentNotes.join("\n"),
+    nextSteps: normalizedMemory.nextSteps.join("\n"),
+  };
+};
+
+const draftToMemory = (draft) => ({
+  goal: draft.goal,
+  stack: draft.stack,
+  decisions: draft.decisions.split("\n"),
+  knownIssues: draft.knownIssues.split("\n"),
+  deploymentNotes: draft.deploymentNotes.split("\n"),
+  nextSteps: draft.nextSteps.split("\n"),
+});
+
+const memoryCapturePattern =
+  /\b(remember|decided|decision|bug|issue|risk|deploy|deployment|production|vercel|render|mongodb|redis|socket|cors|env|environment|stack|todo|next step|use|using|switch)\b/i;
+
+const shouldCaptureMemory = (text = "") => memoryCapturePattern.test(text);
+
+const uniqueList = (items = []) => {
+  const seen = new Set();
+
+  return items
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item) => {
+      const key = item.toLowerCase();
+
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 12);
+};
+
+const mergeMemoryPatch = (currentMemory, patch) => {
+  const current = normalizeMemory(currentMemory);
+
+  return normalizeMemory({
+    goal: patch.goal || current.goal,
+    stack: patch.stack || current.stack,
+    decisions: uniqueList([...(current.decisions || []), ...(patch.decisions || [])]),
+    knownIssues: uniqueList([...(current.knownIssues || []), ...(patch.knownIssues || [])]),
+    deploymentNotes: uniqueList([
+      ...(current.deploymentNotes || []),
+      ...(patch.deploymentNotes || []),
+    ]),
+    nextSteps: uniqueList([...(current.nextSteps || []), ...(patch.nextSteps || [])]),
+  });
+};
+
+const getMemoryPatchEntries = (patch = {}) => {
+  const entries = [];
+
+  if (patch.goal) entries.push({ label: "Goal", values: [patch.goal] });
+  if (patch.stack) entries.push({ label: "Stack", values: [patch.stack] });
+
+  memoryListFields.forEach((field) => {
+    if (Array.isArray(patch[field.key]) && patch[field.key].length) {
+      entries.push({ label: field.label, values: patch[field.key] });
+    }
+  });
+
+  return entries;
+};
+
 const Project = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -84,9 +396,22 @@ const Project = () => {
   };
 
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
+  const [isMemoryPanelOpen, setIsMemoryPanelOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(new Set());
   const [project, setProject] = useState(routeProject || null);
+  const [projectMemory, setProjectMemory] = useState(() =>
+    normalizeMemory(routeProject?.memory || emptyProjectMemory)
+  );
+  const [memoryDraft, setMemoryDraft] = useState(() =>
+    memoryToDraft(routeProject?.memory || emptyProjectMemory)
+  );
+  const [memoryStatus, setMemoryStatus] = useState("");
+  const [isSavingMemory, setIsSavingMemory] = useState(false);
+  const [isGeneratingMemory, setIsGeneratingMemory] = useState(false);
+  const [memorySuggestion, setMemorySuggestion] = useState(null);
+  const [isSuggestingMemory, setIsSuggestingMemory] = useState(false);
+  const [isApplyingMemorySuggestion, setIsApplyingMemorySuggestion] = useState(false);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
@@ -97,6 +422,11 @@ const Project = () => {
   const [webContainer, setWebContainer] = useState(null);
   const [iframeUrl, setIframeUrl] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [activeWorkspace, setActiveWorkspace] = useState("code");
+  const [whiteboardMode, setWhiteboardMode] = useState("canvas");
+  const [isChatCollapsed, setIsChatCollapsed] = useState(false);
+  const [documentContent, setDocumentContent] = useState("");
+  const [projectSocket, setProjectSocket] = useState(null);
 
   const messageBoxRef = useRef(null);
   const codeRef = useRef(null);
@@ -104,11 +434,56 @@ const Project = () => {
   const webContainerRef = useRef(null);
   const didLoadProjectRef = useRef(false);
 
-  const fileNames = useMemo(() => Object.keys(fileTree || {}), [fileTree]);
+  const fileNames = useMemo(() => listFileTreePaths(fileTree), [fileTree]);
+  const currentFileData = useMemo(
+    () => (currentFile ? getFileTreeFile(fileTree, currentFile) : null),
+    [currentFile, fileTree]
+  );
   const availableUsers = useMemo(() => {
     const collaboratorIds = new Set((project?.users || []).map(getUserId));
     return users.filter((candidate) => !collaboratorIds.has(candidate._id));
   }, [project?.users, users]);
+  const memoryItemCount = useMemo(
+    () =>
+      memoryListFields.reduce((count, field) => {
+        return count + (projectMemory[field.key]?.length || 0);
+      }, 0),
+    [projectMemory]
+  );
+  const memorySuggestionEntries = useMemo(
+    () => getMemoryPatchEntries(memorySuggestion?.memory),
+    [memorySuggestion]
+  );
+
+  const requestMemorySuggestion = useCallback(
+    ({ content, eventType = "message" }) => {
+      if (!project?._id || !content?.trim()) return;
+
+      setIsSuggestingMemory(true);
+
+      axios
+        .post("/projects/suggest-memory", {
+          projectId: project._id,
+          eventType,
+          content,
+        })
+        .then((res) => {
+          if (res.data?.shouldSuggest) {
+            setMemorySuggestion({
+              reason: res.data.reason || "SOEN noticed durable project context.",
+              memory: normalizeMemory(res.data.memory || {}),
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to suggest memory:", error);
+        })
+        .finally(() => {
+          setIsSuggestingMemory(false);
+        });
+    },
+    [project?._id]
+  );
 
   useEffect(() => {
     webContainerRef.current = webContainer;
@@ -120,7 +495,8 @@ const Project = () => {
       return;
     }
 
-    initializeSocket(project._id);
+    const socket = initializeSocket(project._id);
+    setProjectSocket(socket);
 
     if (!webContainerRef.current) {
       getWebContainer()
@@ -134,17 +510,29 @@ const Project = () => {
 
     const handleProjectMessage = (data) => {
       if (data.sender?._id === "ai") {
-        try {
-          const parsedMessage = JSON.parse(data.message);
+        const parsedMessage = parseJsonSafely(data.message);
 
-          if (parsedMessage.fileTree) {
-            webContainerRef.current?.mount(parsedMessage.fileTree);
-            setFileTree(parsedMessage.fileTree);
-            setAiError(null);
+        if (parsedMessage?.fileTree) {
+          const safeFileTree = extractAiFileTree(parsedMessage);
+          const safeFileNames = listFileTreePaths(safeFileTree);
+
+          if (!safeFileNames.length) {
+            setAiError("AI returned files in an unsupported format.");
+            setMessages((prevMessages) => [...prevMessages, data]);
+            return;
           }
-        } catch (error) {
-          console.error("Error parsing AI message:", error);
-          setAiError("Could not process the AI response.");
+
+          webContainerRef.current?.mount(safeFileTree);
+          setFileTree(safeFileTree);
+          setOpenFiles(safeFileNames);
+          setCurrentFile((prevFile) =>
+            prevFile && safeFileNames.includes(prevFile) ? prevFile : safeFileNames[0] || null
+          );
+          setAiError(null);
+          requestMemorySuggestion({
+            eventType: "ai-file-generation",
+            content: `AI generated or updated files: ${safeFileNames.join(", ")}. ${parsedMessage.text || ""}`,
+          });
         }
       }
 
@@ -157,10 +545,12 @@ const Project = () => {
       .get(`/projects/get-project/${project._id}`)
       .then((res) => {
         const fetchedProject = res.data.project;
-        const fetchedFileTree = fetchedProject?.fileTree || {};
-        const fetchedFiles = Object.keys(fetchedFileTree);
+        const fetchedFileTree = sanitizeFileTree(fetchedProject?.fileTree || {});
+        const fetchedFiles = listFileTreePaths(fetchedFileTree);
 
         setProject(fetchedProject);
+        setProjectMemory(normalizeMemory(fetchedProject?.memory || emptyProjectMemory));
+        setMemoryDraft(memoryToDraft(fetchedProject?.memory || emptyProjectMemory));
         setFileTree(fetchedFileTree);
         setOpenFiles(fetchedFiles);
         setCurrentFile((prevFile) => prevFile || fetchedFiles[0] || null);
@@ -186,14 +576,31 @@ const Project = () => {
     return () => {
       removeMessageListener("project-message", handleProjectMessage);
       disconnectSocket();
+      setProjectSocket(null);
     };
-  }, [project?._id, navigate]);
+  }, [project?._id, navigate, requestMemorySuggestion]);
 
   useEffect(() => {
     if (messageBoxRef.current) {
       messageBoxRef.current.scrollTop = messageBoxRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    if (activeWorkspace === "split") {
+      setIsChatCollapsed(true);
+    }
+  }, [activeWorkspace]);
+
+  useEffect(() => {
+    if (!project?._id) return;
+    setDocumentContent(localStorage.getItem(`soen-document:${project._id}`) || "");
+  }, [project?._id]);
+
+  useEffect(() => {
+    if (!project?._id) return;
+    localStorage.setItem(`soen-document:${project._id}`, documentContent);
+  }, [documentContent, project?._id]);
 
   const saveFileTree = useCallback(
     (nextFileTree) => {
@@ -214,14 +621,14 @@ const Project = () => {
 
   useEffect(() => {
     if (!didLoadProjectRef.current) return;
-    if (!currentFile || !fileTree[currentFile]) return;
+    if (!currentFile || !currentFileData) return;
 
     const timeoutId = setTimeout(() => {
       saveFileTree(fileTree);
     }, 500);
 
     return () => clearTimeout(timeoutId);
-  }, [fileTree, currentFile, saveFileTree]);
+  }, [fileTree, currentFile, currentFileData, saveFileTree]);
 
   const handleOpenFile = (file) => {
     setCurrentFile(file);
@@ -229,18 +636,9 @@ const Project = () => {
   };
 
   const updateCurrentFileContents = (contents) => {
-    if (!currentFile || !fileTree[currentFile]) return;
+    if (!currentFile || !currentFileData) return;
 
-    setFileTree((prevTree) => ({
-      ...prevTree,
-      [currentFile]: {
-        ...prevTree[currentFile],
-        file: {
-          ...prevTree[currentFile].file,
-          contents,
-        },
-      },
-    }));
+    setFileTree((prevTree) => updateFileTreeFileContents(prevTree, currentFile, contents));
   };
 
   const handleUserClick = (id) => {
@@ -274,17 +672,110 @@ const Project = () => {
       .catch(console.error);
   };
 
+  const updateMemoryDraftField = (field, value) => {
+    setMemoryDraft((prevDraft) => ({
+      ...prevDraft,
+      [field]: value,
+    }));
+  };
+
+  const saveProjectMemory = () => {
+    if (!project?._id) return;
+
+    setIsSavingMemory(true);
+    setMemoryStatus("");
+
+    axios
+      .put("/projects/update-memory", {
+        projectId: project._id,
+        memory: draftToMemory(memoryDraft),
+      })
+      .then((res) => {
+        const nextMemory = normalizeMemory(res.data.memory || res.data.project?.memory);
+        setProject(res.data.project);
+        setProjectMemory(nextMemory);
+        setMemoryDraft(memoryToDraft(nextMemory));
+        setMemoryStatus("Memory saved");
+      })
+      .catch((error) => {
+        setMemoryStatus(error.response?.data?.error || "Could not save memory");
+      })
+      .finally(() => {
+        setIsSavingMemory(false);
+      });
+  };
+
+  const generateProjectMemory = () => {
+    if (!project?._id) return;
+
+    setIsGeneratingMemory(true);
+    setMemoryStatus("");
+
+    axios
+      .post("/projects/generate-memory", {
+        projectId: project._id,
+      })
+      .then((res) => {
+        const nextMemory = normalizeMemory(res.data.memory || res.data.project?.memory);
+        setProject(res.data.project);
+        setProjectMemory(nextMemory);
+        setMemoryDraft(memoryToDraft(nextMemory));
+        setMemoryStatus("Memory refreshed by AI");
+      })
+      .catch((error) => {
+        setMemoryStatus(error.response?.data?.error || "Could not generate memory");
+      })
+      .finally(() => {
+        setIsGeneratingMemory(false);
+      });
+  };
+
+  const acceptMemorySuggestion = () => {
+    if (!project?._id || !memorySuggestion?.memory) return;
+
+    const nextMemory = mergeMemoryPatch(projectMemory, memorySuggestion.memory);
+    setIsApplyingMemorySuggestion(true);
+
+    axios
+      .put("/projects/update-memory", {
+        projectId: project._id,
+        memory: nextMemory,
+      })
+      .then((res) => {
+        const savedMemory = normalizeMemory(res.data.memory || res.data.project?.memory);
+        setProject(res.data.project);
+        setProjectMemory(savedMemory);
+        setMemoryDraft(memoryToDraft(savedMemory));
+        setMemorySuggestion(null);
+        setMemoryStatus("Memory suggestion accepted");
+      })
+      .catch((error) => {
+        setMemoryStatus(error.response?.data?.error || "Could not accept memory suggestion");
+      })
+      .finally(() => {
+        setIsApplyingMemorySuggestion(false);
+      });
+  };
+
   const send = () => {
-    if (!message.trim()) return;
+    const outgoingMessage = message.trim();
+    if (!outgoingMessage) return;
 
     const messageData = {
-      message,
+      message: outgoingMessage,
       sender: user,
     };
 
     sendMessage("project-message", messageData);
     setMessages((prev) => [...prev, { ...messageData, isOutgoing: true }]);
     setMessage("");
+
+    if (shouldCaptureMemory(outgoingMessage)) {
+      requestMemorySuggestion({
+        eventType: "user-message",
+        content: outgoingMessage,
+      });
+    }
   };
 
   const handleRunProject = async () => {
@@ -293,7 +784,8 @@ const Project = () => {
       return;
     }
 
-    const paths = Object.keys(fileTree || {});
+    const safeFileTree = sanitizeFileTree(fileTree);
+    const paths = listFileTreePaths(safeFileTree);
     if (!paths.length) {
       console.error("No files available to run");
       return;
@@ -307,7 +799,7 @@ const Project = () => {
         runProcessRef.current = null;
       }
 
-      await webContainer.mount(fileTree);
+      await webContainer.mount(safeFileTree);
 
       const packageJsonPath = paths.find((path) => path.endsWith("package.json"));
       if (!packageJsonPath) {
@@ -321,7 +813,7 @@ const Project = () => {
 
       let runArgs = ["start"];
       try {
-        const packageJson = JSON.parse(fileTree[packageJsonPath]?.file?.contents || "{}");
+        const packageJson = JSON.parse(getFileTreeFile(safeFileTree, packageJsonPath)?.contents || "{}");
         if (!packageJson?.scripts?.start && packageJson?.scripts?.dev) {
           runArgs = ["run", "dev"];
         }
@@ -401,9 +893,9 @@ const Project = () => {
   };
 
   const renderAiMessage = (rawMessage) => {
-    try {
-      const messageObject = JSON.parse(rawMessage);
+    const messageObject = parseJsonSafely(rawMessage);
 
+    if (messageObject) {
       return (
         <div className="overflow-auto rounded-md bg-zinc-950 p-3 text-sm leading-relaxed text-zinc-50">
           <Markdown
@@ -417,9 +909,9 @@ const Project = () => {
           </Markdown>
         </div>
       );
-    } catch {
-      return <p className="text-sm leading-relaxed">{rawMessage}</p>;
     }
+
+    return <p className="text-sm leading-relaxed">{rawMessage}</p>;
   };
 
   if (!project) {
@@ -432,10 +924,14 @@ const Project = () => {
 
   return (
     <main className={`flex h-screen w-screen overflow-hidden transition-colors ${themeClass.page}`}>
-      <aside className={`relative flex h-full w-[360px] shrink-0 flex-col border-r ${themeClass.surface}`}>
-        <header className={`border-b px-4 py-4 ${themeClass.border}`}>
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
+      <aside
+        className={`relative flex h-full shrink-0 flex-col overflow-hidden border-r transition-[width] duration-200 ${themeClass.surface} ${
+          isChatCollapsed ? "w-16" : "w-[360px]"
+        }`}
+      >
+        <header className={`border-b ${isChatCollapsed ? "px-2 py-3" : "px-4 py-4"} ${themeClass.border}`}>
+          <div className={`flex gap-3 ${isChatCollapsed ? "flex-col items-center" : "items-start justify-between"}`}>
+            <div className={`min-w-0 ${isChatCollapsed ? "hidden" : ""}`}>
               <p className={`text-xs font-medium uppercase tracking-[0.14em] ${themeClass.muted}`}>
                 Project
               </p>
@@ -443,36 +939,86 @@ const Project = () => {
                 {project.name}
               </h1>
             </div>
+            {isChatCollapsed && (
+              <div className={`flex h-10 w-10 items-center justify-center rounded-md text-sm font-semibold ${themeClass.primary}`}>
+                {project.name?.slice(0, 1).toUpperCase() || "S"}
+              </div>
+            )}
             <button
-              onClick={() => navigate("/")}
-              className={`flex h-9 w-9 items-center justify-center rounded-md transition ${themeClass.muted} ${isDark ? "hover:bg-zinc-800 hover:text-zinc-50" : "hover:bg-zinc-100 hover:text-zinc-950"}`}
-              title="Back"
+              onClick={() => setIsChatCollapsed((value) => !value)}
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition ${themeClass.muted} ${isDark ? "hover:bg-zinc-800 hover:text-zinc-50" : "hover:bg-zinc-100 hover:text-zinc-950"}`}
+              title={isChatCollapsed ? "Expand AI chat" : "Shrink AI chat"}
             >
-              <i className="ri-arrow-left-line text-lg" />
+              <i className={`${isChatCollapsed ? "ri-sidebar-unfold-line" : "ri-sidebar-fold-line"} text-lg`} />
             </button>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className={`mt-4 grid gap-2 ${isChatCollapsed ? "grid-cols-1 place-items-center" : "grid-cols-3"}`}>
             <button
-              onClick={() => setIsModalOpen(true)}
-              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition ${themeClass.primary}`}
+              onClick={() => {
+                setIsChatCollapsed(false);
+                setIsModalOpen(true);
+              }}
+              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md text-sm font-medium transition ${themeClass.primary} ${isChatCollapsed ? "w-10 px-0" : "px-3"}`}
+              title="Add collaborator"
             >
               <i className="ri-user-add-line" />
-              Add
+              {!isChatCollapsed && "Add"}
             </button>
             <button
-              onClick={() => setIsSidePanelOpen(true)}
-              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition ${themeClass.ghost}`}
+              onClick={() => {
+                setIsChatCollapsed(false);
+                setIsSidePanelOpen(true);
+              }}
+              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border text-sm font-medium transition ${themeClass.ghost} ${isChatCollapsed ? "w-10 px-0" : "px-3"}`}
+              title="Team"
             >
               <i className="ri-group-line" />
-              Team
+              {!isChatCollapsed && "Team"}
+            </button>
+            <button
+              onClick={() => {
+                setIsChatCollapsed(false);
+                setIsMemoryPanelOpen(true);
+              }}
+              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border text-sm font-medium transition ${themeClass.ghost} ${isChatCollapsed ? "w-10 px-0" : "px-3"}`}
+              title="Memory"
+            >
+              <i className="ri-brain-line" />
+              {!isChatCollapsed && "Memory"}
             </button>
           </div>
         </header>
 
+        <section className={`border-b px-3 py-3 ${themeClass.border} ${isChatCollapsed ? "hidden" : ""}`}>
+          <button
+            type="button"
+            onClick={() => setIsMemoryPanelOpen(true)}
+            className={`w-full rounded-md border p-3 text-left transition ${themeClass.surfaceAlt} ${isDark ? "hover:bg-zinc-800" : "hover:bg-zinc-50"}`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className={`text-xs font-semibold uppercase tracking-[0.14em] ${themeClass.muted}`}>
+                  Project Memory
+                </p>
+                <p className="mt-1 truncate text-sm font-medium">
+                  {projectMemory.goal || "Add context so AI remembers this project"}
+                </p>
+              </div>
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${themeClass.soft}`}>
+                <i className="ri-arrow-right-line" />
+              </span>
+            </div>
+            <div className={`mt-3 flex items-center gap-2 text-xs ${themeClass.muted}`}>
+              <i className="ri-brain-line" />
+              <span>{memoryItemCount} saved notes</span>
+            </div>
+          </button>
+        </section>
+
         <div
           ref={messageBoxRef}
-          className="message-box flex-1 space-y-3 overflow-y-auto px-3 py-4"
+          className={`message-box flex-1 space-y-3 overflow-y-auto px-3 py-4 ${isChatCollapsed ? "hidden" : ""}`}
         >
           {messages.length === 0 && (
             <div className={`rounded-md border border-dashed p-4 text-sm ${themeClass.empty}`}>
@@ -505,15 +1051,76 @@ const Project = () => {
               </div>
             );
           })}
+
+          {(memorySuggestion || isSuggestingMemory) && (
+            <div className="flex justify-start">
+              <div className={`max-w-[92%] rounded-md border p-3 text-sm ${themeClass.surfaceAlt}`}>
+                <div className="flex items-start gap-3">
+                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${themeClass.soft}`}>
+                    <i className={isSuggestingMemory ? "ri-loader-4-line animate-spin" : "ri-brain-line"} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold">
+                      {isSuggestingMemory ? "Checking for memory..." : "Memory update suggested"}
+                    </p>
+                    <p className={`mt-1 text-xs ${themeClass.muted}`}>
+                      {memorySuggestion?.reason || "SOEN is checking whether this should be remembered."}
+                    </p>
+
+                    {memorySuggestionEntries.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {memorySuggestionEntries.map((entry) => (
+                          <div key={entry.label}>
+                            <p className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${themeClass.muted}`}>
+                              {entry.label}
+                            </p>
+                            <ul className="mt-1 space-y-1">
+                              {entry.values.map((value) => (
+                                <li key={value} className="text-xs leading-relaxed">
+                                  {value}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {memorySuggestion && (
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={acceptMemorySuggestion}
+                          disabled={isApplyingMemorySuggestion}
+                          className={`inline-flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${themeClass.primary}`}
+                        >
+                          <i className={isApplyingMemorySuggestion ? "ri-loader-4-line animate-spin" : "ri-check-line"} />
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMemorySuggestion(null)}
+                          disabled={isApplyingMemorySuggestion}
+                          className={`h-8 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${themeClass.ghost}`}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {aiError && (
+        {aiError && !isChatCollapsed && (
           <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             {aiError}
           </div>
         )}
 
-        <div className={`border-t p-3 ${themeClass.border}`}>
+        <div className={`border-t p-3 ${themeClass.border} ${isChatCollapsed ? "hidden" : ""}`}>
           <div className={`flex items-center gap-2 rounded-md border px-2 py-2 ${themeClass.input}`}>
             <input
               value={message}
@@ -537,7 +1144,7 @@ const Project = () => {
 
         <div
           className={`absolute inset-0 z-20 flex flex-col transition-transform duration-200 ${isDark ? "bg-[#17191d]" : "bg-white"} ${
-            isSidePanelOpen ? "translate-x-0" : "-translate-x-full"
+            isSidePanelOpen && !isChatCollapsed ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           <header className={`flex items-center justify-between border-b px-4 py-4 ${themeClass.border}`}>
@@ -570,6 +1177,97 @@ const Project = () => {
             ))}
           </div>
         </div>
+
+        <div
+          className={`absolute inset-0 z-30 flex flex-col transition-transform duration-200 ${isDark ? "bg-[#17191d]" : "bg-white"} ${
+            isMemoryPanelOpen && !isChatCollapsed ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          <header className={`flex items-center justify-between border-b px-4 py-4 ${themeClass.border}`}>
+            <div>
+              <h2 className="text-base font-semibold">Project Memory</h2>
+              <p className={`text-sm ${themeClass.muted}`}>Saved context for AI and teammates</p>
+            </div>
+            <button
+              onClick={() => setIsMemoryPanelOpen(false)}
+              className={`flex h-9 w-9 items-center justify-center rounded-md transition ${themeClass.muted} ${isDark ? "hover:bg-zinc-800 hover:text-zinc-50" : "hover:bg-zinc-100 hover:text-zinc-950"}`}
+            >
+              <i className="ri-close-line text-xl" />
+            </button>
+          </header>
+
+          <div className="flex-1 space-y-4 overflow-y-auto p-4">
+            <label className="block">
+              <span className="text-sm font-semibold">Project goal</span>
+              <textarea
+                value={memoryDraft.goal}
+                onChange={(e) => updateMemoryDraftField("goal", e.target.value)}
+                rows={3}
+                className={`mt-2 w-full resize-none rounded-md border px-3 py-2 text-sm outline-none transition ${themeClass.input}`}
+                placeholder="What is this project trying to become?"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-sm font-semibold">Stack</span>
+              <textarea
+                value={memoryDraft.stack}
+                onChange={(e) => updateMemoryDraftField("stack", e.target.value)}
+                rows={2}
+                className={`mt-2 w-full resize-none rounded-md border px-3 py-2 text-sm outline-none transition ${themeClass.input}`}
+                placeholder="React, Express, MongoDB, Render, Vercel..."
+              />
+            </label>
+
+            {memoryListFields.map((field) => (
+              <label key={field.key} className="block">
+                <span className="text-sm font-semibold">{field.label}</span>
+                <textarea
+                  value={memoryDraft[field.key]}
+                  onChange={(e) => updateMemoryDraftField(field.key, e.target.value)}
+                  rows={4}
+                  className={`mt-2 w-full resize-none rounded-md border px-3 py-2 text-sm outline-none transition ${themeClass.input}`}
+                  placeholder="One note per line"
+                />
+              </label>
+            ))}
+
+            {memoryStatus && (
+              <div
+                className={`rounded-md border px-3 py-2 text-sm ${
+                  memoryStatus.toLowerCase().includes("could not")
+                    ? "border-red-200 bg-red-50 text-red-700"
+                    : isDark
+                      ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                {memoryStatus}
+              </div>
+            )}
+          </div>
+
+          <footer className={`flex gap-2 border-t p-4 ${themeClass.border}`}>
+            <button
+              type="button"
+              onClick={generateProjectMemory}
+              disabled={isGeneratingMemory || isSavingMemory}
+              className={`inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${themeClass.ghost}`}
+            >
+              <i className={isGeneratingMemory ? "ri-loader-4-line animate-spin" : "ri-sparkling-2-line"} />
+              AI Refresh
+            </button>
+            <button
+              type="button"
+              onClick={saveProjectMemory}
+              disabled={isSavingMemory || isGeneratingMemory}
+              className={`inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${themeClass.primary}`}
+            >
+              <i className={isSavingMemory ? "ri-loader-4-line animate-spin" : "ri-save-3-line"} />
+              Save
+            </button>
+          </footer>
+        </div>
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
@@ -585,10 +1283,42 @@ const Project = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/")}
+              className={`hidden h-10 items-center justify-center rounded-md border px-3 text-sm font-medium transition md:inline-flex ${themeClass.ghost}`}
+              title="Back to projects"
+            >
+              <i className="ri-arrow-left-line" />
+            </button>
+            <div className={`hidden items-center rounded-md border p-1 md:flex ${themeClass.ghost}`}>
+              {[
+                { id: "code", label: "Code", icon: "ri-code-s-slash-line" },
+                { id: "split", label: "Split", icon: "ri-layout-column-line" },
+                { id: "whiteboard", label: "Whiteboard", icon: "ri-layout-masonry-line" },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveWorkspace(item.id)}
+                  className={`inline-flex h-8 items-center gap-2 rounded px-3 text-sm font-medium transition ${
+                    activeWorkspace === item.id
+                      ? isDark
+                        ? "bg-zinc-50 text-zinc-950"
+                        : "bg-zinc-950 text-white"
+                      : isDark
+                        ? "text-zinc-300 hover:bg-zinc-800"
+                        : "text-zinc-600 hover:bg-zinc-100"
+                  }`}
+                >
+                  <i className={item.icon} />
+                  {item.label}
+                </button>
+              ))}
+            </div>
             <ThemeToggle />
             <button
               onClick={handleRunProject}
-              disabled={isRunning || !fileNames.length}
+              disabled={activeWorkspace === "whiteboard" || isRunning || !fileNames.length}
               className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <i className={isRunning ? "ri-loader-4-line animate-spin" : "ri-play-fill"} />
@@ -598,7 +1328,7 @@ const Project = () => {
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <aside className={`hidden h-full w-60 shrink-0 border-r md:block ${themeClass.surfaceAlt}`}>
+          {activeWorkspace !== "whiteboard" && <aside className={`hidden h-full w-60 shrink-0 border-r md:block ${themeClass.surfaceAlt}`}>
             <div className={`flex h-11 items-center justify-between border-b px-3 ${themeClass.border}`}>
               <p className={`text-xs font-semibold uppercase tracking-[0.14em] ${themeClass.muted}`}>
                 Files
@@ -631,9 +1361,10 @@ const Project = () => {
                 </button>
               ))}
             </div>
-          </aside>
+          </aside>}
 
-          <section className={`flex min-w-0 flex-1 flex-col ${isDark ? "bg-[#17191d]" : "bg-white"}`}>
+          {activeWorkspace !== "whiteboard" && (
+          <section className={`flex min-w-0 flex-col ${activeWorkspace === "split" ? "basis-1/2 border-r" : "flex-1"} ${isDark ? "bg-[#17191d]" : "bg-white"} ${themeClass.border}`}>
             <div className={`flex h-11 shrink-0 items-center gap-1 overflow-x-auto border-b px-2 ${themeClass.surfaceAlt}`}>
               {openFiles.length === 0 ? (
                 <p className={`px-2 text-sm ${themeClass.muted}`}>No file selected</p>
@@ -659,7 +1390,7 @@ const Project = () => {
             </div>
 
             <div className="min-h-0 flex-1">
-              {currentFile && fileTree[currentFile] ? (
+              {currentFile && currentFileData ? (
                 <pre className="h-full w-full overflow-auto bg-[#101214] p-4 text-sm leading-6 text-zinc-100">
                   <code
                     key={currentFile}
@@ -678,7 +1409,7 @@ const Project = () => {
                     dangerouslySetInnerHTML={{
                       __html: highlightContents(
                         currentFile,
-                        fileTree[currentFile].file.contents || ""
+                        currentFileData.contents || ""
                       ),
                     }}
                     style={{
@@ -700,8 +1431,93 @@ const Project = () => {
               )}
             </div>
           </section>
+          )}
 
-          {iframeUrl && webContainer && (
+          {activeWorkspace === "split" && (
+            <section className="relative min-w-0 basis-1/2 overflow-hidden bg-[#121212]">
+              <Whiteboard
+                projectId={project._id}
+                socket={projectSocket}
+              />
+            </section>
+          )}
+
+          {activeWorkspace === "whiteboard" && (
+            <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#121212]">
+              <div className={`flex h-11 shrink-0 items-center justify-center border-b px-3 ${themeClass.surfaceAlt} ${themeClass.border}`}>
+                <div className={`flex items-center rounded-md border p-1 ${themeClass.ghost}`}>
+                  {[
+                    { id: "document", label: "Document", icon: "ri-file-text-line" },
+                    { id: "both", label: "Both", icon: "ri-layout-column-line" },
+                    { id: "canvas", label: "Canvas", icon: "ri-layout-masonry-line" },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setWhiteboardMode(item.id)}
+                      className={`inline-flex h-8 items-center gap-2 rounded px-3 text-sm font-medium transition ${
+                        whiteboardMode === item.id
+                          ? isDark
+                            ? "bg-zinc-50 text-zinc-950"
+                            : "bg-zinc-950 text-white"
+                          : isDark
+                            ? "text-zinc-300 hover:bg-zinc-800"
+                            : "text-zinc-600 hover:bg-zinc-100"
+                      }`}
+                    >
+                      <i className={item.icon} />
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-1">
+                {(whiteboardMode === "document" || whiteboardMode === "both") && (
+                  <section className={`flex min-w-0 flex-col ${whiteboardMode === "both" ? "basis-1/2 border-r" : "flex-1"} ${isDark ? "bg-[#151515]" : "bg-white"} ${themeClass.border}`}>
+                    <div className={`flex h-11 shrink-0 items-center justify-between border-b px-4 ${themeClass.surfaceAlt}`}>
+                      <p className={`text-xs font-semibold uppercase tracking-[0.14em] ${themeClass.muted}`}>
+                        Document
+                      </p>
+                      <span className={`text-xs ${themeClass.muted}`}>
+                        {fileNames.length} project files
+                      </span>
+                    </div>
+
+                    <div className="min-h-0 flex-1 overflow-y-auto">
+                      <div className="mx-auto flex min-h-full max-w-3xl flex-col px-8 py-12">
+                        <input
+                          value={project.name || ""}
+                          readOnly
+                          className={`w-full bg-transparent text-4xl font-semibold tracking-tight outline-none ${isDark ? "text-zinc-200" : "text-zinc-800"}`}
+                          aria-label="Document title"
+                        />
+                        <textarea
+                          value={documentContent}
+                          onChange={(e) => setDocumentContent(e.target.value)}
+                          className={`mt-6 min-h-[420px] w-full resize-none bg-transparent text-base leading-7 outline-none ${
+                            isDark ? "text-zinc-200 placeholder:text-zinc-500" : "text-zinc-800 placeholder:text-zinc-400"
+                          }`}
+                          placeholder="Type your notes or document here - style with markdown or shortcuts (Ctrl/)"
+                        />
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {(whiteboardMode === "canvas" || whiteboardMode === "both") && (
+                  <section className={`relative min-w-0 overflow-hidden bg-[#121212] ${whiteboardMode === "both" ? "basis-1/2" : "flex-1"}`}>
+                    <Whiteboard
+                      projectId={project._id}
+                      socket={projectSocket}
+                    />
+                  </section>
+                )}
+              </div>
+            </section>
+          )}
+
+          {activeWorkspace === "code" && iframeUrl && webContainer && (
             <aside className={`hidden h-full w-[420px] shrink-0 flex-col border-l xl:flex ${themeClass.surface}`}>
               <div className={`flex h-11 items-center gap-2 border-b px-3 ${themeClass.border}`}>
                 <i className={`ri-global-line ${themeClass.muted}`} />
