@@ -268,6 +268,43 @@ const updateFileTreeFileContents = (tree, path, contents) => {
   return nextTree;
 };
 
+const deleteFileTreePath = (tree, path) => {
+  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (!parts.length) return tree;
+
+  const nextTree = { ...tree };
+  const stack = [];
+  let cursor = nextTree;
+
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    const part = parts[index];
+    const node = cursor[part];
+
+    if (!isPlainObject(node?.directory)) return tree;
+
+    stack.push({ directory: cursor, key: part });
+    cursor[part] = {
+      ...node,
+      directory: {
+        ...node.directory,
+      },
+    };
+    cursor = cursor[part].directory;
+  }
+
+  delete cursor[parts[parts.length - 1]];
+
+  for (let index = stack.length - 1; index >= 0; index -= 1) {
+    const { directory, key } = stack[index];
+
+    if (Object.keys(directory[key].directory).length === 0) {
+      delete directory[key];
+    }
+  }
+
+  return nextTree;
+};
+
 const emptyProjectMemory = {
   goal: "",
   stack: "",
@@ -399,6 +436,7 @@ const Project = () => {
   const [isMemoryPanelOpen, setIsMemoryPanelOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(new Set());
+  const [removingUserId, setRemovingUserId] = useState(null);
   const [project, setProject] = useState(routeProject || null);
   const [projectMemory, setProjectMemory] = useState(() =>
     normalizeMemory(routeProject?.memory || emptyProjectMemory)
@@ -432,6 +470,9 @@ const Project = () => {
   const messageBoxRef = useRef(null);
   const codeRef = useRef(null);
   const editingFileContentsRef = useRef("");
+  const fileTreeDraftSyncTimerRef = useRef(null);
+  const skipNextFileTreeSaveRef = useRef(false);
+  const skipNextDocumentSaveRef = useRef(false);
   const runProcessRef = useRef(null);
   const webContainerRef = useRef(null);
   const didLoadProjectRef = useRef(false);
@@ -493,7 +534,7 @@ const Project = () => {
 
   useEffect(() => {
     if (!project?._id) {
-      navigate("/", { replace: true });
+      navigate("/home", { replace: true });
       return;
     }
 
@@ -531,6 +572,10 @@ const Project = () => {
             prevFile && safeFileNames.includes(prevFile) ? prevFile : safeFileNames[0] || null
           );
           setAiError(null);
+          socket.emit("file-tree:sync", {
+            projectId: project._id,
+            fileTree: safeFileTree,
+          });
           requestMemorySuggestion({
             eventType: "ai-file-generation",
             content: `AI generated or updated files: ${safeFileNames.join(", ")}. ${parsedMessage.text || ""}`,
@@ -543,6 +588,32 @@ const Project = () => {
 
     receiveMessage("project-message", handleProjectMessage);
 
+    const handleRemoteFileTree = (data) => {
+      if (!data?.fileTree || typeof data.fileTree !== "object" || Array.isArray(data.fileTree)) return;
+
+      const safeFileTree = sanitizeFileTree(data.fileTree);
+      const safeFileNames = listFileTreePaths(safeFileTree);
+
+      skipNextFileTreeSaveRef.current = true;
+      setFileTree(safeFileTree);
+      setOpenFiles((prevFiles) => [
+        ...new Set([...prevFiles.filter((file) => safeFileNames.includes(file)), ...safeFileNames.slice(0, 1)]),
+      ]);
+      setCurrentFile((prevFile) =>
+        prevFile && safeFileNames.includes(prevFile) ? prevFile : safeFileNames[0] || null
+      );
+    };
+
+    const handleRemoteDocument = (data) => {
+      if (typeof data?.documentContent !== "string") return;
+
+      skipNextDocumentSaveRef.current = true;
+      setDocumentContent(data.documentContent);
+    };
+
+    socket.on("file-tree:sync", handleRemoteFileTree);
+    socket.on("document:sync", handleRemoteDocument);
+
     axios
       .get(`/projects/get-project/${project._id}`)
       .then((res) => {
@@ -553,6 +624,7 @@ const Project = () => {
         setProject(fetchedProject);
         setProjectMemory(normalizeMemory(fetchedProject?.memory || emptyProjectMemory));
         setMemoryDraft(memoryToDraft(fetchedProject?.memory || emptyProjectMemory));
+        setDocumentContent(fetchedProject?.documentContent || "");
         setFileTree(fetchedFileTree);
         setOpenFiles(fetchedFiles);
         setCurrentFile((prevFile) => prevFile || fetchedFiles[0] || null);
@@ -577,6 +649,8 @@ const Project = () => {
 
     return () => {
       removeMessageListener("project-message", handleProjectMessage);
+      socket.off("file-tree:sync", handleRemoteFileTree);
+      socket.off("document:sync", handleRemoteDocument);
       disconnectSocket();
       setProjectSocket(null);
     };
@@ -600,13 +674,29 @@ const Project = () => {
 
   useEffect(() => {
     if (!project?._id) return;
-    setDocumentContent(localStorage.getItem(`soen-document:${project._id}`) || "");
-  }, [project?._id]);
+    if (skipNextDocumentSaveRef.current) {
+      skipNextDocumentSaveRef.current = false;
+      return;
+    }
 
-  useEffect(() => {
-    if (!project?._id) return;
-    localStorage.setItem(`soen-document:${project._id}`, documentContent);
-  }, [documentContent, project?._id]);
+    const timeoutId = setTimeout(() => {
+      axios
+        .put("/projects/update-document", {
+          projectId: project._id,
+          documentContent,
+        })
+        .catch((err) => {
+          console.error("Failed to update document:", err);
+        });
+
+      projectSocket?.emit("document:sync", {
+        projectId: project._id,
+        documentContent,
+      });
+    }, 350);
+
+    return () => clearTimeout(timeoutId);
+  }, [documentContent, project?._id, projectSocket]);
 
   const saveFileTree = useCallback(
     (nextFileTree) => {
@@ -621,13 +711,22 @@ const Project = () => {
         .catch((err) => {
           console.error("Failed to update file tree:", err);
         });
+
+      projectSocket?.emit("file-tree:sync", {
+        projectId: project._id,
+        fileTree: nextFileTree,
+      });
     },
-    [project?._id]
+    [project?._id, projectSocket]
   );
 
   useEffect(() => {
     if (!didLoadProjectRef.current) return;
     if (!currentFile || !currentFileData) return;
+    if (skipNextFileTreeSaveRef.current) {
+      skipNextFileTreeSaveRef.current = false;
+      return;
+    }
 
     const timeoutId = setTimeout(() => {
       saveFileTree(fileTree);
@@ -645,6 +744,38 @@ const Project = () => {
     if (!currentFile || !currentFileData) return;
 
     setFileTree((prevTree) => updateFileTreeFileContents(prevTree, currentFile, contents));
+  };
+
+  const syncCurrentFileDraft = (contents) => {
+    if (!currentFile || !currentFileData) return;
+
+    const nextTree = updateFileTreeFileContents(fileTree, currentFile, contents);
+
+    if (fileTreeDraftSyncTimerRef.current) {
+      clearTimeout(fileTreeDraftSyncTimerRef.current);
+    }
+
+    fileTreeDraftSyncTimerRef.current = setTimeout(() => {
+      saveFileTree(nextTree);
+    }, 350);
+  };
+
+  const deleteFile = (file) => {
+    if (!file) return;
+
+    const confirmed = window.confirm(`Delete "${file}" from this workspace?`);
+    if (!confirmed) return;
+
+    const nextTree = deleteFileTreePath(fileTree, file);
+    const nextFileNames = listFileTreePaths(nextTree);
+
+    setFileTree(nextTree);
+    setOpenFiles((prevFiles) => prevFiles.filter((openFile) => openFile !== file));
+    setCurrentFile((prevFile) => {
+      if (prevFile !== file) return prevFile;
+      return nextFileNames[0] || null;
+    });
+    saveFileTree(nextTree);
   };
 
   const handleUserClick = (id) => {
@@ -676,6 +807,34 @@ const Project = () => {
         setIsModalOpen(false);
       })
       .catch(console.error);
+  };
+
+  const removeCollaborator = (projectUser) => {
+    const targetUserId = getUserId(projectUser);
+    if (!project?._id || !targetUserId) return;
+
+    const confirmed = window.confirm(
+      `Remove ${projectUser.email || "this collaborator"} from this project?`
+    );
+
+    if (!confirmed) return;
+
+    setRemovingUserId(targetUserId);
+
+    axios
+      .put("/projects/remove-user", {
+        projectId: project._id,
+        userId: targetUserId,
+      })
+      .then((res) => {
+        setProject(res.data.project);
+      })
+      .catch((error) => {
+        console.error("Failed to remove collaborator:", error);
+      })
+      .finally(() => {
+        setRemovingUserId(null);
+      });
   };
 
   const updateMemoryDraftField = (field, value) => {
@@ -1186,6 +1345,21 @@ const Project = () => {
                   <p className="truncate text-sm font-medium">{projectUser.email || "Collaborator"}</p>
                   <p className={`text-xs ${themeClass.muted}`}>Member</p>
                 </div>
+                {projectUser.email !== user?.email && (
+                  <button
+                    type="button"
+                    onClick={() => removeCollaborator(projectUser)}
+                    disabled={removingUserId === getUserId(projectUser)}
+                    className={`ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      isDark
+                        ? "text-red-300 hover:bg-red-500/10"
+                        : "text-red-700 hover:bg-red-50"
+                    }`}
+                    title="Remove collaborator"
+                  >
+                    <i className={removingUserId === getUserId(projectUser) ? "ri-loader-4-line animate-spin" : "ri-user-unfollow-line"} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1299,7 +1473,7 @@ const Project = () => {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => navigate("/")}
+              onClick={() => navigate("/home")}
               className={`hidden h-10 items-center justify-center rounded-md border px-3 text-sm font-medium transition md:inline-flex ${themeClass.ghost}`}
               title="Back to projects"
             >
@@ -1384,10 +1558,9 @@ const Project = () => {
                     )}
 
                     {fileNames.map((file) => (
-                      <button
+                      <div
                         key={file}
-                        onClick={() => handleOpenFile(file)}
-                        className={`flex h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm transition ${
+                        className={`group flex h-10 w-full items-center rounded-md transition ${
                           currentFile === file
                             ? isDark
                               ? "bg-zinc-50 text-zinc-950"
@@ -1397,9 +1570,31 @@ const Project = () => {
                               : "text-zinc-700 hover:bg-zinc-100"
                         }`}
                       >
-                        <i className="ri-file-code-line shrink-0" />
-                        <span className="truncate">{file}</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenFile(file)}
+                          className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 text-left text-sm"
+                        >
+                          <i className="ri-file-code-line shrink-0" />
+                          <span className="truncate">{file}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteFile(file)}
+                          className={`mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md opacity-0 transition group-hover:opacity-100 ${
+                            currentFile === file
+                              ? isDark
+                                ? "text-red-700 hover:bg-zinc-200"
+                                : "text-red-200 hover:bg-zinc-800"
+                              : isDark
+                                ? "text-red-300 hover:bg-red-500/10"
+                                : "text-red-700 hover:bg-red-50"
+                          }`}
+                          title="Delete file"
+                        >
+                          <i className="ri-delete-bin-line" />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </>

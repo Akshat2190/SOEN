@@ -150,6 +150,49 @@ export const addUsersToProject = async ({projectId, users, userId}) => {
 
 }
 
+export const removeUserFromProject = async ({ projectId, targetUserId, userId }) => {
+  validateProjectAndUserIds({ projectId, userId });
+
+  if (!targetUserId) {
+    throw new Error("targetUserId is required");
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+    throw new Error("Invalid targetUserId");
+  }
+
+  if (targetUserId.toString() === userId.toString()) {
+    throw new Error("You cannot remove yourself from the project");
+  }
+
+  const project = await projectModel.findOne({
+    _id: projectId,
+    users: userId,
+  });
+
+  if (!project) {
+    throw new Error("Project not found or access denied");
+  }
+
+  if (!project.users.some((memberId) => memberId.toString() === targetUserId.toString())) {
+    throw new Error("User is not a collaborator on this project");
+  }
+
+  const updatedProject = await projectModel.findByIdAndUpdate(
+    {
+      _id: projectId,
+    },
+    {
+      $pull: { users: targetUserId },
+    },
+    {
+      new: true,
+    }
+  ).populate("users");
+
+  return updatedProject;
+};
+
 export const getProjectById = async ({projectId, userId}) => {
   validateProjectAndUserIds({ projectId, userId });
 
@@ -187,6 +230,33 @@ export const updateFileTree = async ({projectId, fileTree, userId}) => {
 
   return project;
 }
+
+export const updateDocumentContent = async ({ projectId, documentContent, userId }) => {
+  validateProjectAndUserIds({ projectId, userId });
+
+  if (typeof documentContent !== "string") {
+    throw new Error("documentContent is required and must be a string");
+  }
+
+  const project = await projectModel.findOneAndUpdate(
+    {
+      _id: projectId,
+      users: userId,
+    },
+    {
+      documentContent,
+    },
+    {
+      new: true,
+    }
+  ).populate("users");
+
+  if (!project) {
+    throw new Error("Project not found or access denied");
+  }
+
+  return project;
+};
 
 export const updateProjectMemory = async ({ projectId, memory, userId }) => {
   validateProjectAndUserIds({ projectId, userId });

@@ -12,6 +12,7 @@ const Home = () => {
   const [projectName, setProjectName] = useState("");
   const [projects, setProjects] = useState([]);
   const [isCreating, setIsCreating] = useState(false);
+  const [deletingProjectId, setDeletingProjectId] = useState(null);
   const [error, setError] = useState("");
 
   const navigate = useNavigate();
@@ -84,6 +85,33 @@ const Home = () => {
       });
   }
 
+  function deleteProject(project) {
+    if (!project?._id) return;
+
+    const confirmed = window.confirm(
+      `Delete "${project.name}"? This will remove the workspace for every collaborator.`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingProjectId(project._id);
+    setError("");
+
+    axios
+      .delete(`/projects/delete-project/${project._id}`)
+      .then(() => {
+        setProjects((prevProjects) =>
+          prevProjects.filter((currentProject) => currentProject._id !== project._id)
+        );
+      })
+      .catch((err) => {
+        setError(err.response?.data?.error || "Could not delete project");
+      })
+      .finally(() => {
+        setDeletingProjectId(null);
+      });
+  }
+
   useEffect(() => {
     axios
       .get("/projects/all")
@@ -101,13 +129,13 @@ const Home = () => {
         <header className={`flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-center sm:justify-between ${themeClass.border}`}>
           <div className="flex items-center gap-3">
             <div className={`flex h-10 w-10 items-center justify-center rounded-md text-sm font-semibold ${themeClass.primaryButton}`}>
-              SO
+              FX
             </div>
             <div>
               <p className={`text-xs font-medium uppercase tracking-[0.16em] ${themeClass.textMuted}`}>
                 Workspace
               </p>
-              <h1 className="text-2xl font-semibold tracking-tight">SOEN</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">FLUX</h1>
             </div>
           </div>
 
@@ -184,14 +212,23 @@ const Home = () => {
             </button>
 
             {projects.map((project) => (
-              <button
+              <div
                 key={project._id}
                 onClick={() => {
                   navigate("/project", {
                     state: { project },
                   });
                 }}
-                className={`group flex min-h-36 flex-col justify-between rounded-md border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-sm ${themeClass.surface} ${themeClass.cardHover}`}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    navigate("/project", {
+                      state: { project },
+                    });
+                  }
+                }}
+                className={`group flex min-h-36 cursor-pointer flex-col justify-between rounded-md border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-sm ${themeClass.surface} ${themeClass.cardHover}`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -216,8 +253,24 @@ const Home = () => {
                     <i className="ri-user-3-line" />
                     Team
                   </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteProject(project);
+                    }}
+                    disabled={deletingProjectId === project._id}
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      isDark
+                        ? "border-red-500/30 text-red-300 hover:bg-red-500/10"
+                        : "border-red-200 text-red-700 hover:bg-red-50"
+                    }`}
+                  >
+                    <i className={deletingProjectId === project._id ? "ri-loader-4-line animate-spin" : "ri-delete-bin-line"} />
+                    Delete
+                  </button>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </section>

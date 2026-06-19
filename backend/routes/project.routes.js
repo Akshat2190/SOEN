@@ -26,6 +26,12 @@ router.put('/add-user',
     projectController.addUserToProject
 )
 
+router.put('/remove-user',
+    authMiddleware.authUser,
+    body('projectId').isString().withMessage('ProjectId is required'),
+    body('userId').isString().withMessage('UserId is required'),
+    projectController.removeUserFromProject
+)
 
 router.get("/get-project/:projectId", authMiddleware.authUser, projectController.getProjectById);
 
@@ -33,6 +39,12 @@ router.put("/update-file-tree", authMiddleware.authUser, //"/update-file-tree/:p
     body('projectId').isString().withMessage('ProjectId is required'),
     body('fileTree').isObject().withMessage('fileTree is required and must be an object'),
     projectController.updateFileTree);
+
+router.put("/update-document",
+    authMiddleware.authUser,
+    body('projectId').isString().withMessage('ProjectId is required'),
+    body('documentContent').isString().withMessage('documentContent is required and must be a string'),
+    projectController.updateDocumentContent);
 
 router.get("/get-whiteboard/:projectId",
     authMiddleware.authUser,

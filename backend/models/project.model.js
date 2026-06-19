@@ -18,6 +18,10 @@ const projectSchema = new mongoose.Schema({
     type: Object,
     default: {},
   },
+  documentContent: {
+    type: String,
+    default: "",
+  },
   whiteboardState: {
     type: Array,
     default: [],

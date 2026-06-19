@@ -137,6 +137,56 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("file-tree:sync", async (data) => {
+    if (!isSameProjectRoom(data?.projectId) || !data?.fileTree || typeof data.fileTree !== "object" || Array.isArray(data.fileTree)) {
+      return;
+    }
+
+    socket.broadcast.to(socket.roomId).emit("file-tree:sync", {
+      fileTree: data.fileTree,
+      userId: socket.user.email,
+      email: socket.user.email,
+    });
+
+    try {
+      await projectModel.updateOne(
+        {
+          _id: socket.roomId,
+        },
+        {
+          fileTree: data.fileTree,
+        }
+      );
+    } catch (error) {
+      console.warn("file tree sync save failed", error.message);
+    }
+  });
+
+  socket.on("document:sync", async (data) => {
+    if (!isSameProjectRoom(data?.projectId) || typeof data.documentContent !== "string") {
+      return;
+    }
+
+    socket.broadcast.to(socket.roomId).emit("document:sync", {
+      documentContent: data.documentContent,
+      userId: socket.user.email,
+      email: socket.user.email,
+    });
+
+    try {
+      await projectModel.updateOne(
+        {
+          _id: socket.roomId,
+        },
+        {
+          documentContent: data.documentContent,
+        }
+      );
+    } catch (error) {
+      console.warn("document sync save failed", error.message);
+    }
+  });
+
   socket.on("whiteboard:cursor", (data) => {
     if (!isSameProjectRoom(data?.projectId) || typeof data.x !== "number" || typeof data.y !== "number") {
       return;

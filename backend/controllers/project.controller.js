@@ -95,6 +95,33 @@ export const addUserToProject = async (req, res) => {
 
 }
 
+export const removeUserFromProject = async (req, res) => {
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+        return res.status(400).json({errors: errors.array()});
+    }
+
+    try {
+        const {projectId, userId: targetUserId} = req.body;
+
+        const loggedInUser = await userModel.findOne({email: req.user.email});
+
+        const project = await projectService.removeUserFromProject({
+            projectId,
+            targetUserId,
+            userId: loggedInUser._id
+        });
+
+        return res.status(200).json({
+            project
+        });
+    } catch (err) {
+        console.log(err)
+        res.status(400).json({error: err.message});
+    }
+}
+
 export const getProjectById = async (req, res) => {
 
     const {projectId} = req.params;
@@ -134,6 +161,30 @@ export const updateFileTree = async (req, res) => {
 
         return res.status(200).json({project});
         
+    } catch (error) {
+        console.log(error)
+        res.status(400).json({error: error.message});
+    }
+}
+
+export const updateDocumentContent = async (req, res) => {
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+        return res.status(400).json({errors: errors.array()});
+    }
+
+    try {
+        const {projectId, documentContent} = req.body;
+        const loggedInUser = await userModel.findOne({email: req.user.email});
+
+        const project = await projectService.updateDocumentContent({
+            projectId,
+            documentContent,
+            userId: loggedInUser._id
+        });
+
+        return res.status(200).json({project, documentContent: project.documentContent});
     } catch (error) {
         console.log(error)
         res.status(400).json({error: error.message});
