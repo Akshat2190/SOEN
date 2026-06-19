@@ -425,11 +425,13 @@ const Project = () => {
   const [activeWorkspace, setActiveWorkspace] = useState("code");
   const [whiteboardMode, setWhiteboardMode] = useState("canvas");
   const [isChatCollapsed, setIsChatCollapsed] = useState(false);
+  const [isFilesCollapsed, setIsFilesCollapsed] = useState(false);
   const [documentContent, setDocumentContent] = useState("");
   const [projectSocket, setProjectSocket] = useState(null);
 
   const messageBoxRef = useRef(null);
   const codeRef = useRef(null);
+  const editingFileContentsRef = useRef("");
   const runProcessRef = useRef(null);
   const webContainerRef = useRef(null);
   const didLoadProjectRef = useRef(false);
@@ -591,6 +593,10 @@ const Project = () => {
       setIsChatCollapsed(true);
     }
   }, [activeWorkspace]);
+
+  useEffect(() => {
+    editingFileContentsRef.current = currentFileData?.contents || "";
+  }, [currentFile, currentFileData?.contents]);
 
   useEffect(() => {
     if (!project?._id) return;
@@ -929,9 +935,21 @@ const Project = () => {
           isChatCollapsed ? "w-16" : "w-[360px]"
         }`}
       >
-        <header className={`border-b ${isChatCollapsed ? "px-2 py-3" : "px-4 py-4"} ${themeClass.border}`}>
-          <div className={`flex gap-3 ${isChatCollapsed ? "flex-col items-center" : "items-start justify-between"}`}>
-            <div className={`min-w-0 ${isChatCollapsed ? "hidden" : ""}`}>
+        {isChatCollapsed ? (
+          <div className="flex h-full flex-col items-center border-r-0 px-2 py-3">
+            <button
+              onClick={() => setIsChatCollapsed(false)}
+              className={`flex h-10 w-10 items-center justify-center rounded-md transition ${themeClass.primary}`}
+              title="Open AI chat"
+            >
+              <i className="ri-sidebar-unfold-line text-lg" />
+            </button>
+          </div>
+        ) : (
+          <>
+        <header className={`border-b px-4 py-4 ${themeClass.border}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
               <p className={`text-xs font-medium uppercase tracking-[0.14em] ${themeClass.muted}`}>
                 Project
               </p>
@@ -939,11 +957,6 @@ const Project = () => {
                 {project.name}
               </h1>
             </div>
-            {isChatCollapsed && (
-              <div className={`flex h-10 w-10 items-center justify-center rounded-md text-sm font-semibold ${themeClass.primary}`}>
-                {project.name?.slice(0, 1).toUpperCase() || "S"}
-              </div>
-            )}
             <button
               onClick={() => setIsChatCollapsed((value) => !value)}
               className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition ${themeClass.muted} ${isDark ? "hover:bg-zinc-800 hover:text-zinc-50" : "hover:bg-zinc-100 hover:text-zinc-950"}`}
@@ -953,44 +966,44 @@ const Project = () => {
             </button>
           </div>
 
-          <div className={`mt-4 grid gap-2 ${isChatCollapsed ? "grid-cols-1 place-items-center" : "grid-cols-3"}`}>
+          <div className="mt-4 grid grid-cols-3 gap-2">
             <button
               onClick={() => {
                 setIsChatCollapsed(false);
                 setIsModalOpen(true);
               }}
-              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md text-sm font-medium transition ${themeClass.primary} ${isChatCollapsed ? "w-10 px-0" : "px-3"}`}
+              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition ${themeClass.primary}`}
               title="Add collaborator"
             >
               <i className="ri-user-add-line" />
-              {!isChatCollapsed && "Add"}
+              Add
             </button>
             <button
               onClick={() => {
                 setIsChatCollapsed(false);
                 setIsSidePanelOpen(true);
               }}
-              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border text-sm font-medium transition ${themeClass.ghost} ${isChatCollapsed ? "w-10 px-0" : "px-3"}`}
+              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition ${themeClass.ghost}`}
               title="Team"
             >
               <i className="ri-group-line" />
-              {!isChatCollapsed && "Team"}
+              Team
             </button>
             <button
               onClick={() => {
                 setIsChatCollapsed(false);
                 setIsMemoryPanelOpen(true);
               }}
-              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border text-sm font-medium transition ${themeClass.ghost} ${isChatCollapsed ? "w-10 px-0" : "px-3"}`}
+              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition ${themeClass.ghost}`}
               title="Memory"
             >
               <i className="ri-brain-line" />
-              {!isChatCollapsed && "Memory"}
+              Memory
             </button>
           </div>
         </header>
 
-        <section className={`border-b px-3 py-3 ${themeClass.border} ${isChatCollapsed ? "hidden" : ""}`}>
+        <section className={`border-b px-3 py-3 ${themeClass.border}`}>
           <button
             type="button"
             onClick={() => setIsMemoryPanelOpen(true)}
@@ -1018,7 +1031,7 @@ const Project = () => {
 
         <div
           ref={messageBoxRef}
-          className={`message-box flex-1 space-y-3 overflow-y-auto px-3 py-4 ${isChatCollapsed ? "hidden" : ""}`}
+          className="message-box flex-1 space-y-3 overflow-y-auto px-3 py-4"
         >
           {messages.length === 0 && (
             <div className={`rounded-md border border-dashed p-4 text-sm ${themeClass.empty}`}>
@@ -1114,13 +1127,13 @@ const Project = () => {
           )}
         </div>
 
-        {aiError && !isChatCollapsed && (
+        {aiError && (
           <div className="mx-3 mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             {aiError}
           </div>
         )}
 
-        <div className={`border-t p-3 ${themeClass.border} ${isChatCollapsed ? "hidden" : ""}`}>
+        <div className={`border-t p-3 ${themeClass.border}`}>
           <div className={`flex items-center gap-2 rounded-md border px-2 py-2 ${themeClass.input}`}>
             <input
               value={message}
@@ -1144,7 +1157,7 @@ const Project = () => {
 
         <div
           className={`absolute inset-0 z-20 flex flex-col transition-transform duration-200 ${isDark ? "bg-[#17191d]" : "bg-white"} ${
-            isSidePanelOpen && !isChatCollapsed ? "translate-x-0" : "-translate-x-full"
+            isSidePanelOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           <header className={`flex items-center justify-between border-b px-4 py-4 ${themeClass.border}`}>
@@ -1180,7 +1193,7 @@ const Project = () => {
 
         <div
           className={`absolute inset-0 z-30 flex flex-col transition-transform duration-200 ${isDark ? "bg-[#17191d]" : "bg-white"} ${
-            isMemoryPanelOpen && !isChatCollapsed ? "translate-x-0" : "-translate-x-full"
+            isMemoryPanelOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           <header className={`flex items-center justify-between border-b px-4 py-4 ${themeClass.border}`}>
@@ -1268,6 +1281,8 @@ const Project = () => {
             </button>
           </footer>
         </div>
+          </>
+        )}
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
@@ -1328,40 +1343,69 @@ const Project = () => {
         </header>
 
         <div className="flex min-h-0 flex-1">
-          {activeWorkspace !== "whiteboard" && <aside className={`hidden h-full w-60 shrink-0 border-r md:block ${themeClass.surfaceAlt}`}>
-            <div className={`flex h-11 items-center justify-between border-b px-3 ${themeClass.border}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.14em] ${themeClass.muted}`}>
-                Files
-              </p>
-            </div>
-
-            <div className="p-2">
-              {fileNames.length === 0 && (
-                <div className={`rounded-md border border-dashed p-3 text-sm ${themeClass.empty}`}>
-                  No files yet.
+          {activeWorkspace !== "whiteboard" && (
+            <aside
+              className={`hidden h-full shrink-0 overflow-hidden border-r transition-[width] duration-200 md:block ${themeClass.surfaceAlt} ${
+                isFilesCollapsed ? "w-14" : "w-60"
+              }`}
+            >
+              {isFilesCollapsed ? (
+                <div className="flex h-full justify-center px-2 py-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsFilesCollapsed(false)}
+                    className={`flex h-10 w-10 items-center justify-center rounded-md transition ${themeClass.soft} ${isDark ? "hover:bg-zinc-700 hover:text-zinc-50" : "hover:bg-zinc-200 hover:text-zinc-950"}`}
+                    title="Open files"
+                  >
+                    <i className="ri-folder-open-line text-lg" />
+                  </button>
                 </div>
-              )}
+              ) : (
+                <>
+                  <div className={`flex h-11 items-center justify-between border-b px-3 ${themeClass.border}`}>
+                    <p className={`text-xs font-semibold uppercase tracking-[0.14em] ${themeClass.muted}`}>
+                      Files
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setIsFilesCollapsed(true)}
+                      className={`flex h-8 w-8 items-center justify-center rounded-md transition ${themeClass.muted} ${isDark ? "hover:bg-zinc-800 hover:text-zinc-50" : "hover:bg-zinc-100 hover:text-zinc-950"}`}
+                      title="Shrink files"
+                    >
+                      <i className="ri-sidebar-fold-line" />
+                    </button>
+                  </div>
 
-              {fileNames.map((file) => (
-                <button
-                  key={file}
-                  onClick={() => handleOpenFile(file)}
-                  className={`flex h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm transition ${
-                    currentFile === file
-                      ? isDark
-                        ? "bg-zinc-50 text-zinc-950"
-                        : "bg-zinc-950 text-white"
-                      : isDark
-                        ? "text-zinc-300 hover:bg-zinc-800"
-                        : "text-zinc-700 hover:bg-zinc-100"
-                  }`}
-                >
-                  <i className="ri-file-code-line shrink-0" />
-                  <span className="truncate">{file}</span>
-                </button>
-              ))}
-            </div>
-          </aside>}
+                  <div className="p-2">
+                    {fileNames.length === 0 && (
+                      <div className={`rounded-md border border-dashed p-3 text-sm ${themeClass.empty}`}>
+                        No files yet.
+                      </div>
+                    )}
+
+                    {fileNames.map((file) => (
+                      <button
+                        key={file}
+                        onClick={() => handleOpenFile(file)}
+                        className={`flex h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm transition ${
+                          currentFile === file
+                            ? isDark
+                              ? "bg-zinc-50 text-zinc-950"
+                              : "bg-zinc-950 text-white"
+                            : isDark
+                              ? "text-zinc-300 hover:bg-zinc-800"
+                              : "text-zinc-700 hover:bg-zinc-100"
+                        }`}
+                      >
+                        <i className="ri-file-code-line shrink-0" />
+                        <span className="truncate">{file}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </aside>
+          )}
 
           {activeWorkspace !== "whiteboard" && (
           <section className={`flex min-w-0 flex-col ${activeWorkspace === "split" ? "basis-1/2 border-r" : "flex-1"} ${isDark ? "bg-[#17191d]" : "bg-white"} ${themeClass.border}`}>
@@ -1399,12 +1443,12 @@ const Project = () => {
                     contentEditable
                     suppressContentEditableWarning
                     onInput={(e) => {
-                      updateCurrentFileContents(e.target.innerText);
+                      editingFileContentsRef.current = e.currentTarget.innerText;
                     }}
                     onBlur={(e) => {
-                      const updatedContent = e.target.innerText;
+                      const updatedContent = editingFileContentsRef.current;
                       updateCurrentFileContents(updatedContent);
-                      e.target.innerHTML = highlightContents(currentFile, updatedContent);
+                      e.currentTarget.innerHTML = highlightContents(currentFile, updatedContent);
                     }}
                     dangerouslySetInnerHTML={{
                       __html: highlightContents(
