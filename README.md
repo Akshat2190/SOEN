@@ -162,7 +162,7 @@ Memory can be:
 
 - The `Project.jsx` screen embeds a file explorer, editor tabs, and a terminal-like output panel.
 - The WebContainer runtime (`@webcontainer/api`) boots in the browser, receives the file tree from the AI response, runs `npm install`, then starts the application.
-- File edits made in the editor are synced back through `file-tree:sync` events so all collaborators see updates.
+- **Collaborative Editor Sync**: Real-time keystroke synchronization is implemented through a debounced state update (300ms) that decouples user typing and focus events from global component re-renders. This ensures that the user's cursor focus and text selection are preserved while files are synced live to all connected collaborators via `file-tree:sync` socket events and database updates.
 
 ### 4.7 Whiteboard
 
@@ -371,6 +371,7 @@ The `Project.jsx` screen is the core workspace, divided into panels:
 | `DeploymentDoctor.jsx` | Analyses WebContainer errors and suggests fixes |
 | `LoadingExperience.jsx` | Animated loading screen shown during container boot |
 | `ThemeToggle.jsx` | Light/dark mode toggle button |
+| `CollaborativeEditor` (inline in `Project.jsx`) | Decouples typing flow from global state to sync edits in real-time without resetting the cursor |
 
 ### 9.4 Whiteboard Components
 
@@ -630,7 +631,7 @@ Set all environment variables from [Section 11](#11-environment-variables) in th
 - Role-based permissions (owner, editor, viewer).
 - OAuth login (Google, GitHub).
 - Multiple AI provider support (OpenAI, Anthropic).
-- Real-time collaborative code editing with operational transformation or CRDTs.
+- Advanced multi-cursor collaborative code editing with operational transformation (OT) or CRDTs (currently supports debounced live-sync).
 - Export whiteboard as PNG/SVG.
 - Project branching (snapshot and restore project state).
 - Notifications for project activity.

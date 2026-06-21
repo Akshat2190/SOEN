@@ -404,6 +404,85 @@ const getMemoryPatchEntries = (patch = {}) => {
   return entries;
 };
 
+const CollaborativeEditor = ({
+  currentFile,
+  fileTree,
+  setFileTree,
+}) => {
+  const codeRef = useRef(null);
+  const isFocusedRef = useRef(false);
+  const fileContentsRef = useRef("");
+
+  // Get initial file content when mounting or switching files
+  const fileData = useMemo(
+    () => (currentFile ? getFileTreeFile(fileTree, currentFile) : null),
+    [currentFile, fileTree]
+  );
+  const contents = fileData?.contents || "";
+
+  useEffect(() => {
+    if (!codeRef.current) return;
+
+    // Only update innerHTML if we are not editing, or if the incoming content is different
+    // from what we have locally (e.g. remote sync update)
+    if (!isFocusedRef.current || fileContentsRef.current !== contents) {
+      fileContentsRef.current = contents;
+      codeRef.current.innerHTML = highlightContents(currentFile, contents);
+    }
+  }, [currentFile, contents]);
+
+  // Debounced parent state update
+  const debouncedParentUpdate = useMemo(() => {
+    let timer;
+    return (newText) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        setFileTree((prevTree) => updateFileTreeFileContents(prevTree, currentFile, newText));
+      }, 300);
+    };
+  }, [currentFile, setFileTree]);
+
+  const handleInput = (e) => {
+    const text = e.currentTarget.innerText;
+    fileContentsRef.current = text;
+    debouncedParentUpdate(text);
+  };
+
+  const handleFocus = () => {
+    isFocusedRef.current = true;
+  };
+
+  const handleBlur = (e) => {
+    isFocusedRef.current = false;
+    const text = e.currentTarget.innerText;
+    fileContentsRef.current = text;
+    
+    // Cancel any pending debounced updates and update immediately
+    debouncedParentUpdate(text);
+    
+    // Apply syntax highlighting
+    e.currentTarget.innerHTML = highlightContents(currentFile, text);
+  };
+
+  return (
+    <pre className="h-full w-full overflow-auto bg-[#101214] p-4 text-sm leading-6 text-zinc-100">
+      <code
+        ref={codeRef}
+        className="hljs block min-h-full outline-none"
+        contentEditable
+        suppressContentEditableWarning
+        onInput={handleInput}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        style={{
+          whiteSpace: "pre-wrap",
+          paddingBottom: "18rem",
+        }}
+      />
+    </pre>
+  );
+};
+
 const Project = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -468,9 +547,6 @@ const Project = () => {
   const [projectSocket, setProjectSocket] = useState(null);
 
   const messageBoxRef = useRef(null);
-  const codeRef = useRef(null);
-  const editingFileContentsRef = useRef("");
-  const fileTreeDraftSyncTimerRef = useRef(null);
   const skipNextFileTreeSaveRef = useRef(false);
   const skipNextDocumentSaveRef = useRef(false);
   const runProcessRef = useRef(null);
@@ -668,9 +744,6 @@ const Project = () => {
     }
   }, [activeWorkspace]);
 
-  useEffect(() => {
-    editingFileContentsRef.current = currentFileData?.contents || "";
-  }, [currentFile, currentFileData?.contents]);
 
   useEffect(() => {
     if (!project?._id) return;
@@ -740,25 +813,6 @@ const Project = () => {
     setOpenFiles((prevFiles) => [...new Set([...prevFiles, file])]);
   };
 
-  const updateCurrentFileContents = (contents) => {
-    if (!currentFile || !currentFileData) return;
-
-    setFileTree((prevTree) => updateFileTreeFileContents(prevTree, currentFile, contents));
-  };
-
-  const syncCurrentFileDraft = (contents) => {
-    if (!currentFile || !currentFileData) return;
-
-    const nextTree = updateFileTreeFileContents(fileTree, currentFile, contents);
-
-    if (fileTreeDraftSyncTimerRef.current) {
-      clearTimeout(fileTreeDraftSyncTimerRef.current);
-    }
-
-    fileTreeDraftSyncTimerRef.current = setTimeout(() => {
-      saveFileTree(nextTree);
-    }, 350);
-  };
 
   const deleteFile = (file) => {
     if (!file) return;
@@ -1630,33 +1684,11 @@ const Project = () => {
 
             <div className="min-h-0 flex-1">
               {currentFile && currentFileData ? (
-                <pre className="h-full w-full overflow-auto bg-[#101214] p-4 text-sm leading-6 text-zinc-100">
-                  <code
-                    key={currentFile}
-                    ref={codeRef}
-                    className="hljs block min-h-full outline-none"
-                    contentEditable
-                    suppressContentEditableWarning
-                    onInput={(e) => {
-                      editingFileContentsRef.current = e.currentTarget.innerText;
-                    }}
-                    onBlur={(e) => {
-                      const updatedContent = editingFileContentsRef.current;
-                      updateCurrentFileContents(updatedContent);
-                      e.currentTarget.innerHTML = highlightContents(currentFile, updatedContent);
-                    }}
-                    dangerouslySetInnerHTML={{
-                      __html: highlightContents(
-                        currentFile,
-                        currentFileData.contents || ""
-                      ),
-                    }}
-                    style={{
-                      whiteSpace: "pre-wrap",
-                      paddingBottom: "18rem",
-                    }}
-                  />
-                </pre>
+                <CollaborativeEditor
+                  currentFile={currentFile}
+                  fileTree={fileTree}
+                  setFileTree={setFileTree}
+                />
               ) : (
                 <div className={`flex h-full items-center justify-center ${isDark ? "bg-[#17191d]" : "bg-white"}`}>
                   <div className={`max-w-sm rounded-md border border-dashed p-6 text-center ${themeClass.empty}`}>
