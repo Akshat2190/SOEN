@@ -208,6 +208,21 @@ export const getProjectById = async ({projectId, userId}) => {
   return project;
 }
 
+export const deleteProject = async ({ projectId, userId }) => {
+  validateProjectAndUserIds({ projectId, userId });
+
+  const project = await projectModel.findOneAndDelete({
+    _id: projectId,
+    users: userId,
+  });
+
+  if (!project) {
+    throw new Error("Project not found or access denied");
+  }
+
+  return project;
+};
+
 export const updateFileTree = async ({projectId, fileTree, userId}) => {
   validateProjectAndUserIds({ projectId, userId });
 

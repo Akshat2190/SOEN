@@ -73,4 +73,8 @@ router.post("/suggest-memory",
     body('content').isString().trim().isLength({ min: 3 }).withMessage('content is required'),
     projectController.suggestProjectMemory);
 
+router.delete('/delete-project/:projectId',
+    authMiddleware.authUser,
+    projectController.deleteProject);
+
 export default router;
